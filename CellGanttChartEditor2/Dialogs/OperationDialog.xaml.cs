@@ -30,10 +30,8 @@ public partial class OperationDialog : Window
         _existingRegion = existingRegion;
 
         CategoryBox.ItemsSource = RegionCategoryInfo.Options;
-        RobotBox.ItemsSource = Presets.Combine(Presets.RobotNames, document.Robots());
-        OperationBox.ItemsSource = Presets.Combine(
-            Presets.OperationNames,
-            document.Operations.Select(o => o.Name));
+        RobotBox.ItemsSource =  document.Robots();
+        OperationBox.ItemsSource = document.Operations.Select(o => o.Name);
 
         if (existingRegion != null)
         {
