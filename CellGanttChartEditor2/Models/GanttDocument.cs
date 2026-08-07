@@ -18,6 +18,26 @@ public sealed class GanttDocument
 
     public List<OperationLink> Links { get; } = new();
 
+    /// <summary>
+    /// Row arrangement, one per grouping mode. What a row *is* changes with the mode - robots when
+    /// grouping by region, regions when grouping by robot, single operations when chronological -
+    /// so an order dragged out in one mode means nothing in another and each keeps its own.
+    /// </summary>
+    public RowLayout RobotRows { get; init; } = new();
+
+    public RowLayout RegionRows { get; init; } = new();
+
+    public RowLayout OperationRows { get; init; } = new();
+
+    public RowLayout LayoutFor(ChartGroupMode mode) => mode switch
+    {
+        ChartGroupMode.Region => RobotRows,
+        ChartGroupMode.Robot => RegionRows,
+        _ => OperationRows,
+    };
+
+    public static string KeyOf(Guid id) => id.ToString("N");
+
     /// <summary>Raw bytes of the embedded reference image (whatever format the user picked).</summary>
     public byte[]? ImageData { get; set; }
 
@@ -114,6 +134,15 @@ public sealed class GanttDocument
     {
         var used = Operations.Select(o => o.RegionId).ToHashSet();
         Regions.RemoveAll(r => !used.Contains(r.Id));
+        PruneLayouts();
+    }
+
+    /// <summary>Clears row order and group entries that no longer name a live row.</summary>
+    public void PruneLayouts()
+    {
+        RobotRows.Prune(Robots());
+        RegionRows.Prune(Regions.Select(r => KeyOf(r.Id)).ToList());
+        OperationRows.Prune(Operations.Select(o => KeyOf(o.Id)).ToList());
     }
 
     /// <summary>
@@ -236,5 +265,8 @@ public sealed class GanttDocument
             return;
         foreach (var op in Operations.Where(o => string.Equals(o.RobotName, oldName, StringComparison.OrdinalIgnoreCase)))
             op.RobotName = newName;
+
+        // The robot's name is its row key, so the layout has to follow it.
+        RobotRows.Rekey(oldName, newName);
     }
 }

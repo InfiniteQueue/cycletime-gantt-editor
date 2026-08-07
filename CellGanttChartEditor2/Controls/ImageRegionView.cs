@@ -64,6 +64,7 @@ public sealed class ImageRegionView : FrameworkElement
 
     private readonly List<(Rect Screen, ChartRegion Region)> _boxHits = new();
     private readonly List<(Rect Screen, ChartRegion Region)> _labelHits = new();
+    private readonly HashSet<Guid> _highlighted = new();
     private ChartRegion? _hover;
 
     private static Pen MakeRubberBandPen()
@@ -89,8 +90,11 @@ public sealed class ImageRegionView : FrameworkElement
     /// <summary>Supplies the allocated colour a region's border is painted with.</summary>
     public Func<ChartRegion, Brush>? BrushProvider { get; set; }
 
-    /// <summary>Region whose border is currently emphasised (driven by chart hover).</summary>
-    public Guid? HighlightedRegionId { get; private set; }
+    /// <summary>
+    /// Regions whose borders are currently emphasised, driven by chart hover. Hovering a bar
+    /// names one; hovering a row header names every region that row's operations touch.
+    /// </summary>
+    public IReadOnlyCollection<Guid> HighlightedRegionIds => _highlighted;
 
     public bool IsPicking => _pick != null;
 
@@ -129,11 +133,15 @@ public sealed class ImageRegionView : FrameworkElement
             FitToWindow();
     }
 
-    public void SetHighlightedRegion(Guid? regionId)
+    public void SetHighlightedRegions(IReadOnlyCollection<Guid>? regionIds)
     {
-        if (HighlightedRegionId == regionId)
+        var next = regionIds ?? Array.Empty<Guid>();
+        if (_highlighted.Count == next.Count && next.All(_highlighted.Contains))
             return;
-        HighlightedRegionId = regionId;
+
+        _highlighted.Clear();
+        foreach (var id in next)
+            _highlighted.Add(id);
         InvalidateVisual();
     }
 
@@ -234,7 +242,7 @@ public sealed class ImageRegionView : FrameworkElement
 
         _boxHits.Add((screen, region));
 
-        var highlighted = HighlightedRegionId == region.Id || ReferenceEquals(_hover, region);
+        var highlighted = _highlighted.Contains(region.Id) || ReferenceEquals(_hover, region);
         var stroke = BrushProvider?.Invoke(region) ?? Brushes.Orange;
 
         var thickness = Math.Clamp(BaseBorderThickness * _scale, 2.5, 10);

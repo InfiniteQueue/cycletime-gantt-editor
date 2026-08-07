@@ -38,6 +38,18 @@ public partial class ChartView : UserControl
     private const double MinOverlapWidth = 5;
     private const double LinkElbow = 12;
 
+    /// <summary>
+    /// A group's own line: a thin strip when expanded, and when collapsed a band a little shorter
+    /// than a row, since it stands in for the rows it hides.
+    /// </summary>
+    private const double GroupStripHeight = 20;
+    private const double CollapsedGroupHeight = 30;
+    private const double GroupIndent = 12;
+    private const double ChevronBox = 16;
+
+    /// <summary>Fraction of a row's height at each end that means "drop between" rather than "group".</summary>
+    private const double ReorderEdgeFraction = 0.3;
+
     private static readonly Brush SurfaceBrush = Palette.Brush(Palette.ChartSurface);
     private static readonly Brush RowBrushA = Palette.Brush(Palette.RowA);
     private static readonly Brush RowBrushB = Palette.Brush(Palette.RowB);
@@ -55,6 +67,14 @@ public partial class ChartView : UserControl
     private static readonly Pen SelectedLinkPen = Palette.Pen(Colors.White, 2.4);
     private static readonly Brush LinkBrush = Palette.Brush(Palette.Link);
     private static readonly Pen GhostPen = MakeGhostPen();
+    private static readonly Brush GroupBandBrush = Palette.Brush(Palette.GroupBand);
+    private static readonly Brush GroupBlockBrush = Palette.Brush(Palette.GroupBlock);
+    private static readonly Pen GroupEdgePen = Palette.Pen(Palette.GroupEdge, 1);
+    private static readonly Pen GroupBlockPen = Palette.Pen(Palette.BarOutline, 1);
+    private static readonly Pen DropIndicatorPen = Palette.Pen(Palette.DropIndicator, 3);
+    private static readonly Pen DropOntoPen = Palette.Pen(Palette.DropIndicator, 2.5);
+    private static readonly Brush DraggedRowBrush =
+        Palette.Brush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
 
     /// <summary>Rounded ends on the bars, as in the previous editor.</summary>
     private const double BarCornerRadius = 3;
@@ -62,11 +82,13 @@ public partial class ChartView : UserControl
     private static readonly Typeface BoldFace = new(new FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
 
     private readonly List<RowInfo> _rows = new();
+    private readonly List<Line> _lines = new();
     private readonly Dictionary<Guid, int> _rowOfOperation = new();
     private readonly List<(Rect Rect, Operation Operation)> _barHits = new();
     private readonly List<(Rect Rect, Operation Operation)> _resizeHits = new();
     private readonly List<(Point[] Points, OperationLink Link)> _linkHits = new();
-    private readonly List<(Rect Rect, RowInfo Row)> _headerHits = new();
+    private readonly List<(Rect Rect, Line Line)> _headerHits = new();
+    private readonly List<(Rect Rect, RowGroup Group)> _chevronHits = new();
     private readonly ToolTip _tip = new()
     {
         Placement = PlacementMode.Relative,
@@ -95,7 +117,29 @@ public partial class ChartView : UserControl
 
     private object? _hovered;
     private TextBox? _headerEditor;
-    private RowInfo? _headerEditorRow;
+    private Line? _headerEditorLine;
+
+    // Row drag: which header was grabbed, and where releasing would put it.
+    private RowRef? _pressedHeader;
+    private bool _draggingRow;
+    private RowRef? _rowDropOnto;
+    private int _rowDropBefore = -1;
+
+    /// <summary>
+    /// Names a header in a way that survives the line list being rebuilt, which happens on every
+    /// render and so happens repeatedly mid-drag: a row by its key, a group by its id. Holding the
+    /// <see cref="Line"/> itself would leave the drag pointing at an object no longer on screen.
+    /// </summary>
+    private readonly record struct RowRef(string? Key, Guid? GroupId);
+
+    private static RowRef RefOf(Line line) =>
+        line.IsGroup ? new RowRef(null, line.Group!.Id) : new RowRef(line.Row!.Key, null);
+
+    private bool Matches(Line line, RowRef reference) => reference.GroupId.HasValue
+        ? line.Group?.Id == reference.GroupId
+        : line.Row != null && string.Equals(line.Row.Key, reference.Key, StringComparison.OrdinalIgnoreCase);
+
+    private Line? Resolve(RowRef reference) => _lines.FirstOrDefault(l => Matches(l, reference));
 
     public ChartView()
     {
@@ -130,8 +174,11 @@ public partial class ChartView : UserControl
     /// <summary>Raised when the conflict set was recomputed.</summary>
     public event EventHandler? ConflictsChanged;
 
-    /// <summary>Region under the pointer, so the host can highlight its border on the image.</summary>
-    public event EventHandler<Guid?>? HoveredRegionChanged;
+    /// <summary>
+    /// Regions under the pointer, so the host can highlight their borders on the image. A bar names
+    /// one; a row header names every region that row's operations are involved with.
+    /// </summary>
+    public event EventHandler<IReadOnlyCollection<Guid>>? HoveredRegionChanged;
 
     public void SetDocument(GanttDocument? document)
     {
@@ -204,6 +251,35 @@ public partial class ChartView : UserControl
         public Operation? Single;
         public List<Operation> Operations = new();
         public HashSet<Guid> Ghosted = new();
+
+        /// <summary>What the layout orders and groups this row by. See <see cref="RowLayout"/>.</summary>
+        public string Key = string.Empty;
+    }
+
+    /// <summary>
+    /// One horizontal band of the chart. Rows no longer all share a height - a group contributes a
+    /// line of its own - so each line carries its own top and height rather than being placed by
+    /// multiplying an index.
+    /// </summary>
+    private sealed class Line
+    {
+        public double Top;
+        public double Height;
+
+        /// <summary>Set on an ordinary row line.</summary>
+        public RowInfo? Row;
+
+        /// <summary>Set on a group's own line, collapsed or not.</summary>
+        public RowGroup? Group;
+
+        /// <summary>Everything inside a collapsed group, for the occupancy blocks.</summary>
+        public List<Operation> Contents = new();
+
+        /// <summary>True for a row drawn inside an expanded group, which sits indented.</summary>
+        public bool Nested;
+
+        public bool IsGroup => Group != null;
+        public Rect HeaderRect(double top) => new(0, top, HeaderWidth, Height);
     }
 
     private void BuildRows()
@@ -251,6 +327,7 @@ public partial class ChartView : UserControl
                         Title = robot,
                         Kind = RowKind.Robot,
                         RobotName = robot,
+                        Key = robot,
                         Operations = ops.Where(Keep).ToList(),
                         Ghosted = ghosted,
                     });
@@ -268,6 +345,7 @@ public partial class ChartView : UserControl
                         Title = region.Name,
                         Kind = RowKind.Region,
                         RegionId = region.Id,
+                        Key = GanttDocument.KeyOf(region.Id),
                         Operations = ops.Where(Keep).ToList(),
                         Ghosted = ghosted,
                     });
@@ -287,6 +365,7 @@ public partial class ChartView : UserControl
                             Title = op.Name,
                             Kind = RowKind.Operation,
                             Single = op,
+                            Key = GanttDocument.KeyOf(op.Id),
                             Operations = new List<Operation> { op },
                             Ghosted = ghosted,
                         });
@@ -299,14 +378,98 @@ public partial class ChartView : UserControl
                     break;
         }
 
-        void AddRow(RowInfo row)
+        LayOutLines();
+
+        void AddRow(RowInfo row) => _rows.Add(row);
+    }
+
+    /// <summary>
+    /// Turns the natural row list into the lines actually drawn: applies the manual order, pulls
+    /// each group's members together behind a line of their own, and stacks everything up with
+    /// explicit tops. <see cref="_rowOfOperation"/> is rebuilt here, pointing an operation inside a
+    /// collapsed group at the group's line so links still have somewhere to land.
+    /// </summary>
+    private void LayOutLines()
+    {
+        _lines.Clear();
+        _rowOfOperation.Clear();
+        if (Document == null)
+            return;
+
+        var layout = Document.LayoutFor(GroupMode);
+
+        // Chronological rows are ordered by time, so a manual order has nothing to attach to.
+        var ordered = GroupMode == ChartGroupMode.Chronological
+            ? _rows
+            : _rows
+                .Select((row, natural) => (row, natural))
+                .OrderBy(x => layout.IndexOf(x.row.Key))
+                .ThenBy(x => x.natural)
+                .Select(x => x.row)
+                .ToList();
+
+        // Tops are in content space, from zero. The ruler offset and scroll are applied at draw
+        // time, so laying out does not have to wait for the scroll to be clamped against a height
+        // that this very pass is what produces.
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var y = 0.0;
+
+        foreach (var row in ordered)
         {
-            var index = _rows.Count;
-            _rows.Add(row);
-            foreach (var op in row.Operations)
-                _rowOfOperation[op.Id] = index;
+            if (!emitted.Add(row.Key))
+                continue;
+
+            var group = layout.GroupOf(row.Key);
+            if (group == null)
+            {
+                Add(new Line { Row = row, Height = RowHeight });
+                continue;
+            }
+
+            // Members may have drifted apart in the order; the group gathers them back together.
+            var members = ordered.Where(r => ContainsKey(group, r.Key)).ToList();
+            foreach (var member in members)
+                emitted.Add(member.Key);
+
+            var groupLine = new Line
+            {
+                Group = group,
+                Height = group.Collapsed ? CollapsedGroupHeight : GroupStripHeight,
+                Contents = members.SelectMany(m => m.Operations).ToList(),
+            };
+            Add(groupLine);
+
+            if (group.Collapsed)
+            {
+                var index = _lines.Count - 1;
+                foreach (var op in groupLine.Contents)
+                    _rowOfOperation[op.Id] = index;
+                continue;
+            }
+
+            foreach (var member in members)
+                Add(new Line { Row = member, Height = RowHeight, Nested = true });
+        }
+
+        void Add(Line line)
+        {
+            line.Top = y;
+            y += line.Height;
+            var index = _lines.Count;
+            _lines.Add(line);
+            if (line.Row != null)
+                foreach (var op in line.Row.Operations)
+                    _rowOfOperation[op.Id] = index;
         }
     }
+
+    private static bool ContainsKey(RowGroup group, string key) =>
+        group.Members.Contains(key, StringComparer.OrdinalIgnoreCase);
+
+    private double ContentHeight => _lines.Count == 0 ? 0 : _lines[^1].Top + _lines[^1].Height;
+
+    /// <summary>Screen-space top of a line, once the ruler and the scroll are taken into account.</summary>
+    private double ScreenTop(Line line) => RulerHeight + line.Top - _scrollY;
 
     private IEnumerable<Operation> OrderChronologically()
     {
@@ -353,6 +516,7 @@ public partial class ChartView : UserControl
         _resizeHits.Clear();
         _linkHits.Clear();
         _headerHits.Clear();
+        _chevronHits.Clear();
 
         dc.DrawRectangle(SurfaceBrush, null, new Rect(size));
 
@@ -375,16 +539,15 @@ public partial class ChartView : UserControl
         _pxPerUnit = contentW / cycle;
 
         var viewportH = Math.Max(10, size.Height - RulerHeight);
-        var totalH = _rows.Count * RowHeight;
+        var totalH = ContentHeight;
         _scrollY = Math.Clamp(_scrollY, 0, Math.Max(0, totalH - viewportH));
 
         double X(double t) => HeaderWidth + t * _pxPerUnit - _scrollX;
-        double RowTop(int index) => RulerHeight + index * RowHeight - _scrollY;
 
         var chartRect = new Rect(HeaderWidth, RulerHeight, size.Width - HeaderWidth, size.Height - RulerHeight);
         var step = TickStep();
 
-        DrawRowBands(dc, size, RowTop);
+        DrawRowBands(dc, size);
         DrawRuler(dc, size, cycle, step, X);
 
         dc.PushClip(new RectangleGeometry(chartRect));
@@ -400,25 +563,35 @@ public partial class ChartView : UserControl
         foreach (var edge in new[] { X(0), X(cycle) })
             dc.DrawLine(CycleEdgePen, new Point(edge, RulerHeight), new Point(edge, size.Height));
 
-        DrawGhost(dc, RowTop, X, cycle);
+        DrawGhost(dc, X, cycle);
 
-        for (var i = 0; i < _rows.Count; i++)
+        foreach (var line in _lines)
         {
-            var top = RowTop(i);
-            if (top > size.Height || top + RowHeight < RulerHeight)
+            var top = ScreenTop(line);
+            if (top > size.Height || top + line.Height < RulerHeight)
                 continue;
-            foreach (var op in _rows[i].Operations)
-                DrawBar(dc, op, top, _rows[i].Ghosted.Contains(op.Id) && RegionFilter.Count > 0, X, cycle);
+
+            if (line.IsGroup)
+            {
+                if (line.Group!.Collapsed)
+                    DrawGroupOccupancy(dc, line, top, X, cycle);
+                continue;
+            }
+
+            foreach (var op in line.Row!.Operations)
+                DrawBar(dc, op, top, line.Row.Ghosted.Contains(op.Id) && RegionFilter.Count > 0, X, cycle);
         }
 
-        DrawLinks(dc, RowTop, X, cycle);
+        DrawLinks(dc, X, cycle);
 
         dc.Pop();
 
-        DrawHeaders(dc, size, RowTop);
+        DrawHeaders(dc, size);
+        // Over everything, including the header column the row is being dragged in.
+        DrawRowDropIndicator(dc, size);
         UpdateScrollBars(contentW, viewportW, totalH, viewportH);
 
-        if (_rows.Count == 0)
+        if (_lines.Count == 0)
         {
             var hint = Text(Document.Operations.Count == 0
                 ? "No operations yet - use \"Add operation\" to place the first one."
@@ -427,50 +600,189 @@ public partial class ChartView : UserControl
         }
     }
 
-    private void DrawRowBands(DrawingContext dc, Size size, Func<int, double> rowTop)
+    private void DrawRowBands(DrawingContext dc, Size size)
     {
-        for (var i = 0; i < _rows.Count; i++)
+        for (var i = 0; i < _lines.Count; i++)
         {
-            var top = rowTop(i);
-            if (top > size.Height || top + RowHeight < RulerHeight)
+            var line = _lines[i];
+            var top = ScreenTop(line);
+            if (top > size.Height || top + line.Height < RulerHeight)
                 continue;
-            // Alternating bands run the full width, header column included.
-            dc.DrawRectangle(RowBand(i), null, new Rect(0, top, size.Width, RowHeight));
+
+            // Alternating bands run the full width, header column included. A group's own line
+            // takes a flat colour instead, so the block it heads reads as one thing.
+            var brush = line.IsGroup ? GroupBandBrush : RowBand(i);
+            dc.DrawRectangle(brush, null, new Rect(0, top, size.Width, line.Height));
+
+            if (line.IsGroup)
+                dc.DrawLine(GroupEdgePen, new Point(0, top + 0.5), new Point(size.Width, top + 0.5));
+
+            if (IsBeingDragged(line))
+                dc.DrawRectangle(DraggedRowBrush, null, new Rect(0, top, size.Width, line.Height));
         }
     }
 
     private static Brush RowBand(int index) => index % 2 == 0 ? RowBrushA : RowBrushB;
 
-    private void DrawHeaders(DrawingContext dc, Size size, Func<int, double> rowTop)
+    /// <summary>True for the line the user has picked up, and for the members it takes with it.</summary>
+    private bool IsBeingDragged(Line line)
+    {
+        if (!_draggingRow || _pressedHeader is not { } dragged)
+            return false;
+        if (Matches(line, dragged))
+            return true;
+
+        // A group travels with its rows.
+        if (dragged.GroupId is not { } id || line.Row == null)
+            return false;
+        var group = Document?.LayoutFor(GroupMode).FindGroup(id);
+        return group != null && ContainsKey(group, line.Row.Key);
+    }
+
+    /// <summary>
+    /// While a row is in flight: a bright rule where it would land, or an outline round the row it
+    /// would join into a group.
+    /// </summary>
+    private void DrawRowDropIndicator(DrawingContext dc, Size size)
+    {
+        if (!_draggingRow)
+            return;
+
+        if (_rowDropOnto is { } onto && Resolve(onto) is { } target)
+        {
+            var top = ScreenTop(target);
+            dc.DrawRoundedRectangle(null, DropOntoPen,
+                new Rect(1.5, top + 1.5, size.Width - 3, target.Height - 3), 3, 3);
+            return;
+        }
+
+        if (_rowDropBefore < 0)
+            return;
+
+        var y = _rowDropBefore < _lines.Count
+            ? ScreenTop(_lines[_rowDropBefore])
+            : ScreenTop(_lines[^1]) + _lines[^1].Height;
+        dc.DrawLine(DropIndicatorPen, new Point(0, y), new Point(size.Width, y));
+    }
+
+    /// <summary>
+    /// A collapsed group stands in for every row it hides, so it blocks in the union of their
+    /// occupied times. The fill is deliberately neutral: the block covers several regions or robots
+    /// at once and any one of their colours would claim it for that one.
+    /// </summary>
+    private void DrawGroupOccupancy(DrawingContext dc, Line line, double top, Func<double, double> x,
+        double cycle)
+    {
+        var bands = TimeMath.Merge(line.Contents
+            .SelectMany(op => TimeMath.Bands(op.Start, op.Duration, cycle)));
+
+        var height = line.Height - BarInset * 2 + 2;
+        foreach (var band in bands)
+        {
+            var left = x(band.From);
+            var width = Math.Max(2, x(band.To) - left);
+            dc.DrawRoundedRectangle(GroupBlockBrush, GroupBlockPen,
+                new Rect(left, top + BarInset - 1, width, Math.Max(2, height)),
+                BarCornerRadius, BarCornerRadius);
+        }
+    }
+
+    /// <summary>
+    /// A group's header: a chevron that toggles it, then the name. The name is what a double-click
+    /// renames, the same gesture that renames an ordinary row.
+    /// </summary>
+    private void DrawGroupHeader(DrawingContext dc, Line line, Rect rect)
+    {
+        var group = line.Group!;
+        dc.DrawRectangle(GroupBandBrush, null, rect);
+        if (IsBeingDragged(line))
+            dc.DrawRectangle(DraggedRowBrush, null, rect);
+
+        var chevron = new Rect(4, rect.Top + (rect.Height - ChevronBox) / 2, ChevronBox, ChevronBox);
+        _chevronHits.Add((chevron, group));
+        DrawChevron(dc, chevron, group.Collapsed);
+
+        var count = group.Members.Count;
+        var text = Text($"{group.Name}  ({count})", 11.5, TextBrush, BoldFace);
+        text.MaxTextWidth = Math.Max(20, HeaderWidth - chevron.Right - 10);
+        text.MaxLineCount = 1;
+        text.Trimming = TextTrimming.CharacterEllipsis;
+        dc.DrawText(text, new Point(chevron.Right + 4, rect.Top + (rect.Height - text.Height) / 2));
+    }
+
+    /// <summary>Points right when the group is collapsed, down when it is open.</summary>
+    private static void DrawChevron(DrawingContext dc, Rect box, bool collapsed)
+    {
+        var cx = box.Left + box.Width / 2;
+        var cy = box.Top + box.Height / 2;
+        const double r = 3.6;
+
+        var geometry = new StreamGeometry();
+        using (var ctx = geometry.Open())
+        {
+            if (collapsed)
+            {
+                ctx.BeginFigure(new Point(cx - r * 0.7, cy - r), true, true);
+                ctx.LineTo(new Point(cx + r * 0.8, cy), true, false);
+                ctx.LineTo(new Point(cx - r * 0.7, cy + r), true, false);
+            }
+            else
+            {
+                ctx.BeginFigure(new Point(cx - r, cy - r * 0.7), true, true);
+                ctx.LineTo(new Point(cx + r, cy - r * 0.7), true, false);
+                ctx.LineTo(new Point(cx, cy + r * 0.8), true, false);
+            }
+        }
+        geometry.Freeze();
+        dc.DrawGeometry(TextBrush, null, geometry);
+    }
+
+    private void DrawHeaders(DrawingContext dc, Size size)
     {
         dc.PushClip(new RectangleGeometry(new Rect(0, RulerHeight, HeaderWidth, size.Height - RulerHeight)));
         dc.DrawRectangle(SurfaceBrush, null, new Rect(0, RulerHeight, HeaderWidth, size.Height - RulerHeight));
 
-        for (var i = 0; i < _rows.Count; i++)
+        for (var i = 0; i < _lines.Count; i++)
         {
-            var top = rowTop(i);
-            if (top > size.Height || top + RowHeight < RulerHeight)
+            var line = _lines[i];
+            var top = ScreenTop(line);
+            if (top > size.Height || top + line.Height < RulerHeight)
                 continue;
 
-            var rect = new Rect(0, top, HeaderWidth, RowHeight);
-            _headerHits.Add((rect, _rows[i]));
-            dc.DrawRectangle(RowBand(i), null, rect);
+            var rect = new Rect(0, top, HeaderWidth, line.Height);
+            _headerHits.Add((rect, line));
 
-            var row = _rows[i];
+            if (line.IsGroup)
+            {
+                DrawGroupHeader(dc, line, rect);
+                continue;
+            }
+
+            dc.DrawRectangle(RowBand(i), null, rect);
+            if (IsBeingDragged(line))
+                dc.DrawRectangle(DraggedRowBrush, null, rect);
+
+            var row = line.Row!;
+            var indent = line.Nested ? GroupIndent : 0;
+
             // In "group by robot" the header is a region, so it carries the region's colour.
             if (row.Kind == RowKind.Region)
             {
                 var region = Document?.FindRegion(row.RegionId);
                 if (region != null)
                     dc.DrawRoundedRectangle(RegionColors.GetBrush(region.ColorKey), null,
-                        new Rect(0, top + 5, 5, RowHeight - 10), 2, 2);
+                        new Rect(indent, top + 5, 5, line.Height - 10), 2, 2);
             }
 
+            // A gutter down the left marks how far the group above it reaches.
+            if (line.Nested)
+                dc.DrawRectangle(GroupBandBrush, null, new Rect(0, top, GroupIndent - 4, line.Height));
+
             var text = Text(row.Title, 12.5, TextBrush, BoldFace);
-            text.MaxTextWidth = HeaderWidth - 16;
+            text.MaxTextWidth = Math.Max(20, HeaderWidth - 16 - indent);
             text.MaxLineCount = 1;
             text.Trimming = TextTrimming.CharacterEllipsis;
-            dc.DrawText(text, new Point(10, top + (RowHeight - text.Height) / 2));
+            dc.DrawText(text, new Point(10 + indent, top + (line.Height - text.Height) / 2));
         }
 
         dc.Pop();
@@ -502,14 +814,14 @@ public partial class ChartView : UserControl
         dc.Pop();
     }
 
-    private void DrawGhost(DrawingContext dc, Func<int, double> rowTop, Func<double, double> x, double cycle)
+    private void DrawGhost(DrawingContext dc, Func<double, double> x, double cycle)
     {
         if (!_dragging || _pressedOperation == null)
             return;
-        if (!_rowOfOperation.TryGetValue(_pressedOperation.Id, out var rowIndex))
+        if (!_rowOfOperation.TryGetValue(_pressedOperation.Id, out var lineIndex))
             return;
 
-        var top = rowTop(rowIndex);
+        var top = ScreenTop(_lines[lineIndex]);
         foreach (var band in TimeMath.Bands(_dragOriginalStart, _dragOriginalDuration, cycle))
         {
             var rect = BandRect(band, top, x);
@@ -623,7 +935,7 @@ public partial class ChartView : UserControl
         dc.Pop();
     }
 
-    private void DrawLinks(DrawingContext dc, Func<int, double> rowTop, Func<double, double> x, double cycle)
+    private void DrawLinks(DrawingContext dc, Func<double, double> x, double cycle)
     {
         if (Document == null)
             return;
@@ -634,6 +946,8 @@ public partial class ChartView : UserControl
             var target = Document.FindOperation(link.TargetId);
             if (source == null || target == null)
                 continue;
+            // An operation inside a collapsed group maps to the group's line, so the arrow lands on
+            // the block standing in for it rather than vanishing.
             if (!_rowOfOperation.TryGetValue(source.Id, out var sourceRow) ||
                 !_rowOfOperation.TryGetValue(target.Id, out var targetRow))
                 continue;
@@ -643,8 +957,10 @@ public partial class ChartView : UserControl
             if (sourceBands.Count == 0 || targetBands.Count == 0)
                 continue;
 
-            var from = new Point(x(sourceBands[^1].To), rowTop(sourceRow) + RowHeight / 2);
-            var to = new Point(x(targetBands[0].From), rowTop(targetRow) + RowHeight / 2);
+            var sourceLine = _lines[sourceRow];
+            var targetLine = _lines[targetRow];
+            var from = new Point(x(sourceBands[^1].To), ScreenTop(sourceLine) + sourceLine.Height / 2);
+            var to = new Point(x(targetBands[0].From), ScreenTop(targetLine) + targetLine.Height / 2);
 
             var points = Route(from, to);
             _linkHits.Add((points, link));
@@ -655,7 +971,8 @@ public partial class ChartView : UserControl
 
             // Fade the arrow to match when either end is only on screen because of the filter.
             var dimmed = RegionFilter.Count > 0 &&
-                         (_rows[sourceRow].Ghosted.Contains(source.Id) || _rows[targetRow].Ghosted.Contains(target.Id));
+                         ((sourceLine.Row?.Ghosted.Contains(source.Id) ?? false) ||
+                          (targetLine.Row?.Ghosted.Contains(target.Id) ?? false));
             if (dimmed)
                 dc.PushOpacity(Palette.DimmedOpacity);
 
@@ -822,6 +1139,24 @@ public partial class ChartView : UserControl
             return;
         }
 
+        // The chevron is a button, not the start of a drag.
+        if (ToggleChevronAt(position))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var header = position.X < HeaderWidth ? HitHeader(position) : null;
+        _pressedHeader = header == null ? null : RefOf(header);
+        if (_pressedHeader != null)
+        {
+            _pressPoint = position;
+            Surface.CaptureMouse();
+            HideTip();
+            Surface.InvalidateVisual();
+            return;
+        }
+
         _pressedOperation = HitBar(position);
         _resizing = _pressedOperation != null && OnResizeGrip(_pressedOperation, position);
         _pressedLink = _pressedOperation == null ? HitLink(position) : null;
@@ -848,6 +1183,18 @@ public partial class ChartView : UserControl
             return;
 
         var position = e.GetPosition(Surface);
+
+        if (_pressedHeader != null && e.LeftButton == MouseButtonState.Pressed)
+        {
+            if (!_draggingRow && (position - _pressPoint).Length < DragSlop)
+                return;
+
+            _draggingRow = true;
+            HideTip();
+            UpdateRowDropTarget(position);
+            Surface.InvalidateVisual();
+            return;
+        }
 
         if (_pressedOperation != null && e.LeftButton == MouseButtonState.Pressed)
         {
@@ -885,6 +1232,225 @@ public partial class ChartView : UserControl
         }
 
         UpdateHover(position);
+    }
+
+    // ------------------------------------------------------------- row drags
+
+    /// <summary>
+    /// Works out what releasing here would mean: near a row's middle, joining it into a group;
+    /// near either end, dropping between rows.
+    ///
+    /// Chronological rows take their order from the operation times, so there is nothing there for
+    /// a reorder to change. The drop-between gesture is still offered when the row being dragged is
+    /// inside a group, because it is the only way back out of one - it just leaves the group rather
+    /// than moving anything.
+    /// </summary>
+    private void UpdateRowDropTarget(Point position)
+    {
+        _rowDropOnto = null;
+        _rowDropBefore = -1;
+
+        var target = HitHeader(position);
+        var allowBetween = GroupMode != ChartGroupMode.Chronological || DraggingOutOfGroup;
+
+        if (target == null)
+        {
+            // Past the end of the list: drop at the bottom.
+            if (allowBetween && _lines.Count > 0 && position.Y > ScreenTop(_lines[^1]) + _lines[^1].Height)
+                _rowDropBefore = _lines.Count;
+            Surface.InvalidateVisual();
+            return;
+        }
+
+        if (IsBeingDragged(target))
+            return;
+
+        var top = ScreenTop(target);
+        var edge = target.Height * ReorderEdgeFraction;
+        var index = _lines.IndexOf(target);
+
+        if (allowBetween && position.Y < top + edge)
+            _rowDropBefore = index;
+        else if (allowBetween && position.Y > top + target.Height - edge)
+            _rowDropBefore = index + 1;
+        else
+            _rowDropOnto = RefOf(target);
+    }
+
+    /// <summary>True when the row in flight is a group member, so a drop between rows frees it.</summary>
+    private bool DraggingOutOfGroup
+    {
+        get
+        {
+            // Dragging the group's own header is not dragging something out of it.
+            if (Document == null || _pressedHeader is not { GroupId: null, Key: { } key })
+                return false;
+            return Document.LayoutFor(GroupMode).GroupOf(key) != null;
+        }
+    }
+
+    /// <summary>Applies a released row drag: either a reorder, or a grouping.</summary>
+    private void DropRow(RowRef source, RowRef? ontoRef, int before)
+    {
+        if (Document == null)
+        {
+            Surface.InvalidateVisual();
+            return;
+        }
+
+        var layout = Document.LayoutFor(GroupMode);
+
+        if (ontoRef is { } reference && Resolve(reference) is { } onto)
+        {
+            GroupRows(layout, source, onto);
+            RaiseEdited();
+            return;
+        }
+
+        if (before < 0)
+        {
+            Surface.InvalidateVisual();
+            return;
+        }
+
+        if (GroupMode == ChartGroupMode.Chronological)
+        {
+            // Nothing to reorder here, but the row still comes out of its group and falls back to
+            // its place in time.
+            LeaveGroups(layout, source);
+            return;
+        }
+
+        ReorderRow(layout, source, before);
+        RaiseEdited();
+    }
+
+    /// <summary>
+    /// Puts the dragged row and the row it landed on into one group - joining the target's group
+    /// when it already has one, so dropping onto a group adds to it rather than nesting.
+    /// </summary>
+    private void GroupRows(RowLayout layout, RowRef source, Line onto)
+    {
+        var moving = KeysOf(source);
+        if (moving.Count == 0)
+            return;
+
+        var target = onto.Group ?? (onto.Row == null ? null : layout.GroupOf(onto.Row.Key));
+        if (target == null)
+        {
+            target = new RowGroup { Name = SuggestGroupName(onto, Resolve(source)) };
+            layout.Groups.Add(target);
+            layout.AddToGroup(target, onto.Row!.Key);
+        }
+
+        foreach (var key in moving)
+        {
+            if (ContainsKey(target, key))
+                continue;
+            layout.AddToGroup(target, key);
+        }
+
+        // Chronological rows are laid out by time and the group gathers its own members anyway, so
+        // writing a manual order there would only leave dead state behind in the saved file.
+        if (GroupMode == ChartGroupMode.Chronological)
+            return;
+
+        // Members sit together on screen, so put them together in the order too - after the last
+        // one already there, so a row added to a group joins the end of it.
+        var order = DisplayedKeys();
+        order.RemoveAll(k => moving.Contains(k, StringComparer.OrdinalIgnoreCase));
+        var anchor = order.FindLastIndex(k => ContainsKey(target, k));
+        order.InsertRange(anchor < 0 ? order.Count : anchor + 1, moving);
+        layout.SetOrder(order);
+    }
+
+    /// <summary>Frees the dragged rows from whatever groups hold them, and redraws if any did.</summary>
+    private void LeaveGroups(RowLayout layout, RowRef source)
+    {
+        var left = false;
+        foreach (var key in KeysOf(source))
+        {
+            if (layout.GroupOf(key) == null)
+                continue;
+            layout.LeaveGroup(key);
+            left = true;
+        }
+
+        if (left)
+            RaiseEdited();
+        else
+            Surface.InvalidateVisual();
+    }
+
+    private void ReorderRow(RowLayout layout, RowRef source, int before)
+    {
+        var moving = KeysOf(source);
+        if (moving.Count == 0)
+            return;
+
+        // The insertion point is a line index; turn it into a position among row keys.
+        var order = DisplayedKeys();
+        var anchorKey = before < _lines.Count ? FirstKeyFrom(before) : null;
+
+        foreach (var key in moving)
+            layout.LeaveGroup(key);
+
+        order.RemoveAll(k => moving.Contains(k, StringComparer.OrdinalIgnoreCase));
+        var at = anchorKey == null
+            ? order.Count
+            : order.FindIndex(k => string.Equals(k, anchorKey, StringComparison.OrdinalIgnoreCase));
+        if (at < 0)
+            at = order.Count;
+
+        order.InsertRange(at, moving);
+        layout.SetOrder(order);
+    }
+
+    /// <summary>Row keys a header carries: one for a row, all its members for a group.</summary>
+    private List<string> KeysOf(RowRef reference)
+    {
+        if (reference.GroupId is not { } id)
+            return reference.Key == null ? new List<string>() : new List<string> { reference.Key };
+
+        var group = Document?.LayoutFor(GroupMode).FindGroup(id);
+        return group == null
+            ? new List<string>()
+            : DisplayedKeys().Where(k => ContainsKey(group, k)).ToList();
+    }
+
+    private List<string> DisplayedKeys() =>
+        _lines.Where(l => l.Row != null).Select(l => l.Row!.Key).ToList();
+
+    /// <summary>First row key at or after a line index, which is where an insertion lands.</summary>
+    private string? FirstKeyFrom(int lineIndex)
+    {
+        for (var i = lineIndex; i < _lines.Count; i++)
+            if (_lines[i].Row != null)
+                return _lines[i].Row!.Key;
+        return null;
+    }
+
+    private static string SuggestGroupName(Line a, Line? b)
+    {
+        var first = a.Row?.Title ?? a.Group?.Name;
+        var second = b?.Row?.Title ?? b?.Group?.Name;
+        return string.IsNullOrWhiteSpace(first) || string.IsNullOrWhiteSpace(second)
+            ? "Group"
+            : $"{first} + {second}";
+    }
+
+    /// <summary>Flips a group open or shut if the click landed on its chevron.</summary>
+    private bool ToggleChevronAt(Point position)
+    {
+        foreach (var (rect, group) in _chevronHits)
+        {
+            if (!rect.Contains(position))
+                continue;
+            group.Collapsed = !group.Collapsed;
+            RaiseEdited();
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -949,6 +1515,24 @@ public partial class ChartView : UserControl
         base.OnMouseLeftButtonUp(e);
         Surface.ReleaseMouseCapture();
 
+        if (_pressedHeader is { } source)
+        {
+            var wasRowDrag = _draggingRow;
+            var onto = _rowDropOnto;
+            var before = _rowDropBefore;
+
+            _pressedHeader = null;
+            _draggingRow = false;
+            _rowDropOnto = null;
+            _rowDropBefore = -1;
+
+            if (wasRowDrag)
+                DropRow(source, onto, before);
+            else
+                Surface.InvalidateVisual();
+            return;
+        }
+
         var dragged = _pressedOperation;
         var wasDragging = _dragging;
         var dropTarget = _dropTarget;
@@ -1010,7 +1594,7 @@ public partial class ChartView : UserControl
         if (_hovered != null)
         {
             _hovered = null;
-            HoveredRegionChanged?.Invoke(this, null);
+            HoveredRegionChanged?.Invoke(this, Array.Empty<Guid>());
             Surface.InvalidateVisual();
         }
     }
@@ -1067,11 +1651,15 @@ public partial class ChartView : UserControl
             return;
         }
 
-        foreach (var (rect, row) in _headerHits)
+        // The chevron already toggled on the first of the two clicks; do not also rename.
+        if (_chevronHits.Any(c => c.Rect.Contains(position)))
+            return;
+
+        foreach (var (rect, line) in _headerHits)
         {
             if (rect.Contains(position))
             {
-                ShowHeaderEditor(row, rect);
+                ShowHeaderEditor(line, rect);
                 return;
             }
         }
@@ -1108,6 +1696,14 @@ public partial class ChartView : UserControl
         return false;
     }
 
+    private Line? HitHeader(Point position)
+    {
+        foreach (var (rect, line) in _headerHits)
+            if (rect.Contains(position))
+                return line;
+        return null;
+    }
+
     private OperationLink? HitLink(Point position)
     {
         const double tolerance = 5;
@@ -1142,16 +1738,20 @@ public partial class ChartView : UserControl
             return;
 
         var bar = HitBar(position);
+        var header = bar == null && position.X < HeaderWidth ? HitHeader(position) : null;
         object? hit = bar;
+        hit ??= header;
         hit ??= HitLink(position);
 
         // Advertise the resize grip before the user commits to a drag.
-        Surface.Cursor = bar != null && OnResizeGrip(bar, position) ? Cursors.SizeWE : null;
+        Surface.Cursor = bar != null && OnResizeGrip(bar, position) ? Cursors.SizeWE
+            //: header != null ? Cursors.SizeAll
+            : null;
 
         if (!ReferenceEquals(hit, _hovered))
         {
             _hovered = hit;
-            HoveredRegionChanged?.Invoke(this, bar?.RegionId);
+            HoveredRegionChanged?.Invoke(this, RegionsOf(hit));
             Surface.InvalidateVisual();
         }
 
@@ -1165,11 +1765,43 @@ public partial class ChartView : UserControl
         {
             Operation op => BarTip(op),
             OperationLink link => LinkTip(link),
+            Line line => HeaderTip(line),
             _ => null,
         };
         _tip.HorizontalOffset = position.X + 18;
         _tip.VerticalOffset = position.Y + 22;
         _tip.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Every region the hovered thing touches: one for a bar, all of a row's for a row header, and
+    /// everything inside a group for a group header. The host lights these up on the image.
+    /// </summary>
+    private IReadOnlyCollection<Guid> RegionsOf(object? hit) => hit switch
+    {
+        Operation op => new[] { op.RegionId },
+        Line line => OperationsOf(line).Select(o => o.RegionId).Distinct().ToArray(),
+        _ => Array.Empty<Guid>(),
+    };
+
+    private IEnumerable<Operation> OperationsOf(Line line) =>
+        line.Row?.Operations ?? (IEnumerable<Operation>)line.Contents;
+
+    private string HeaderTip(Line line)
+    {
+        if (line.IsGroup)
+        {
+            var names = line.Group!.Members.Count;
+            return $"{line.Group.Name}\n" +
+                   $"{names} rows, {line.Contents.Count} operations\n" +
+                   (line.Group.Collapsed ? "Click the arrow to expand" : "Click the arrow to collapse");
+        }
+
+        var ops = line.Row!.Operations;
+        var regions = ops.Select(o => Document?.RegionOf(o)?.Name ?? "(none)").Distinct().ToList();
+        return $"{line.Row.Title}\n" +
+               $"{ops.Count} operations\n" +
+               $"Regions: {string.Join(", ", regions)}";
     }
 
     private string BarTip(Operation op)
@@ -1200,14 +1832,14 @@ public partial class ChartView : UserControl
 
     // -------------------------------------------------------- header editing
 
-    private void ShowHeaderEditor(RowInfo row, Rect rect)
+    private void ShowHeaderEditor(Line line, Rect rect)
     {
         CommitHeaderEditor();
 
-        _headerEditorRow = row;
+        _headerEditorLine = line;
         _headerEditor = new TextBox
         {
-            Text = row.Title,
+            Text = line.Group?.Name ?? line.Row?.Title ?? string.Empty,
             Width = rect.Width - 8,
             Height = 24,
             Padding = new Thickness(2),
@@ -1244,16 +1876,37 @@ public partial class ChartView : UserControl
     private void CommitHeaderEditor()
     {
         var editor = _headerEditor;
-        var row = _headerEditorRow;
-        if (editor == null || row == null || Document == null)
+        var line = _headerEditorLine;
+        if (editor == null || line == null || Document == null)
             return;
 
         _headerEditor = null;
-        _headerEditorRow = null;
+        _headerEditorLine = null;
         Overlay.Children.Remove(editor);
 
         var name = editor.Text.Trim();
-        if (name.Length == 0 || name == row.Title)
+        if (name.Length == 0)
+        {
+            Surface.InvalidateVisual();
+            return;
+        }
+
+        if (line.Group != null)
+        {
+            if (name != line.Group.Name)
+            {
+                line.Group.Name = name;
+                RaiseEdited();
+            }
+            else
+            {
+                Surface.InvalidateVisual();
+            }
+            return;
+        }
+
+        var row = line.Row!;
+        if (name == row.Title)
         {
             Surface.InvalidateVisual();
             return;
@@ -1282,7 +1935,7 @@ public partial class ChartView : UserControl
     {
         var editor = _headerEditor;
         _headerEditor = null;
-        _headerEditorRow = null;
+        _headerEditorLine = null;
         if (editor != null)
             Overlay.Children.Remove(editor);
         Surface.InvalidateVisual();

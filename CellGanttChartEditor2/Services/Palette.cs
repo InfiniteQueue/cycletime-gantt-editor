@@ -31,6 +31,15 @@ public static class Palette
     /// <summary>Backing plate for the region title drawn over the image.</summary>
     public static readonly Color LabelPlate = Color.FromArgb(200, 0x10, 0x12, 0x16);
 
+    // Row groups. The collapsed block is deliberately colourless: it stands for several regions or
+    // robots at once, so borrowing any one of their hues would misread.
+    public static readonly Color GroupBand = Rgb(0x26, 0x2A, 0x33);
+    public static readonly Color GroupEdge = Rgb(0x4A, 0x51, 0x60);
+    public static readonly Color GroupBlock = Rgb(0x8A, 0x92, 0xA3);
+
+    /// <summary>Where a dragged row would land.</summary>
+    public static readonly Color DropIndicator = Rgb(0x3D, 0xDC, 0x84);
+
     /// <summary>Opacity for bars that are only on screen because they link to something in the filter.</summary>
     public const double DimmedOpacity = 0.32;
 

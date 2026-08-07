@@ -15,7 +15,8 @@ public static class DocumentFile
     public const string Extension = ".cgc";
     public const string Filter = "Cell Gantt chart (*.cgc)|*.cgc|All files (*.*)|*.*";
 
-    private const int CurrentVersion = 1;
+    /// <summary>2 added the per-mode row layouts. Version 1 files still load; they simply have none.</summary>
+    private const int CurrentVersion = 2;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -57,6 +58,9 @@ public static class DocumentFile
                 TargetId = l.TargetId,
                 Lag = l.Lag,
             }).ToList(),
+            RobotRows = ToDto(document.RobotRows),
+            RegionRows = ToDto(document.RegionRows),
+            OperationRows = ToDto(document.OperationRows),
         };
 
         File.WriteAllText(path, JsonSerializer.Serialize(dto, Options));
@@ -72,6 +76,9 @@ public static class DocumentFile
             CycleTime = dto.CycleTime <= 0 ? 60 : dto.CycleTime,
             ImageFileName = dto.ImageFileName,
             ImageData = string.IsNullOrEmpty(dto.ImageData) ? null : Convert.FromBase64String(dto.ImageData),
+            RobotRows = FromDto(dto.RobotRows),
+            RegionRows = FromDto(dto.RegionRows),
+            OperationRows = FromDto(dto.OperationRows),
         };
 
         foreach (var r in dto.Regions)
@@ -118,6 +125,46 @@ public static class DocumentFile
         return document;
     }
 
+    private static RowLayoutDto ToDto(RowLayout layout) => new()
+    {
+        Order = layout.Order.Select(k => (string?)k).ToList(),
+        Groups = layout.Groups.Select(g => new RowGroupDto
+        {
+            Id = g.Id,
+            Name = g.Name,
+            Collapsed = g.Collapsed,
+            Members = g.Members.Select(m => (string?)m).ToList(),
+        }).ToList(),
+    };
+
+    private static RowLayout FromDto(RowLayoutDto? dto)
+    {
+        var layout = new RowLayout();
+        if (dto == null)
+            return layout;
+
+        layout.Order.AddRange(Clean(dto.Order));
+        foreach (var g in dto.Groups)
+        {
+            var members = Clean(g.Members);
+            // A group of one is meaningless; drop it rather than draw an empty band.
+            if (members.Count < 2)
+                continue;
+            layout.Groups.Add(new RowGroup
+            {
+                Id = g.Id == Guid.Empty ? Guid.NewGuid() : g.Id,
+                Name = string.IsNullOrWhiteSpace(g.Name) ? "Group" : g.Name,
+                Collapsed = g.Collapsed,
+                Members = members,
+            });
+        }
+        return layout;
+    }
+
+    /// <summary>Row keys straight out of JSON, with any nulls or blanks dropped.</summary>
+    private static List<string> Clean(IEnumerable<string?> keys) =>
+        keys.Where(k => !string.IsNullOrEmpty(k)).Select(k => k!).ToList();
+
     private sealed class DocumentDto
     {
         public int Version { get; set; }
@@ -127,6 +174,23 @@ public static class DocumentFile
         public List<RegionDto> Regions { get; set; } = new();
         public List<OperationDto> Operations { get; set; } = new();
         public List<LinkDto> Links { get; set; } = new();
+        public RowLayoutDto? RobotRows { get; set; }
+        public RowLayoutDto? RegionRows { get; set; }
+        public RowLayoutDto? OperationRows { get; set; }
+    }
+
+    private sealed class RowLayoutDto
+    {
+        public List<string?> Order { get; set; } = new();
+        public List<RowGroupDto> Groups { get; set; } = new();
+    }
+
+    private sealed class RowGroupDto
+    {
+        public Guid Id { get; set; }
+        public string? Name { get; set; }
+        public bool Collapsed { get; set; }
+        public List<string?> Members { get; set; } = new();
     }
 
     private sealed class RegionDto

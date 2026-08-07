@@ -35,7 +35,7 @@ public partial class MainWindow : Window
         Chart.RobotColors = _robotColors;
         Chart.Edited += (_, _) => RefreshAll();
         Chart.ConflictsChanged += (_, _) => UpdateConflictCount();
-        Chart.HoveredRegionChanged += (_, regionId) => ImageView.SetHighlightedRegion(regionId);
+        Chart.HoveredRegionChanged += (_, regionIds) => ImageView.SetHighlightedRegions(regionIds);
 
         // Region borders take the finer checker tile so the pattern still reads inside a stroke.
         ImageView.BrushProvider = region => _regionColors.GetStrokeBrush(region.ColorKey);
