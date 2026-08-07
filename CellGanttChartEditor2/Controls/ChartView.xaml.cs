@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -207,6 +208,7 @@ public partial class ChartView : UserControl
 
     private void BuildRows()
     {
+        var oldRows = new List<RowInfo>(_rows);
         _rows.Clear();
         _rowOfOperation.Clear();
         if (Document == null)
@@ -273,21 +275,28 @@ public partial class ChartView : UserControl
                 break;
 
             default:
-                foreach (var op in OrderChronologically())
+                if (_chronologicalFreeze == null)
                 {
-                    // One row per operation, so a linked operation keeps its row and just fades.
-                    if (filtering && !primary.Contains(op.Id) && !ghosted.Contains(op.Id))
-                        continue;
-                    AddRow(new RowInfo
+                    foreach (var op in OrderChronologically())
                     {
-                        Title = op.Name,
-                        Kind = RowKind.Operation,
-                        Single = op,
-                        Operations = new List<Operation> { op },
-                        Ghosted = ghosted,
-                    });
+                        // One row per operation, so a linked operation keeps its row and just fades.
+                        if (filtering && !primary.Contains(op.Id) && !ghosted.Contains(op.Id))
+                            continue;
+                        AddRow(new RowInfo
+                        {
+                            Title = op.Name,
+                            Kind = RowKind.Operation,
+                            Single = op,
+                            Operations = new List<Operation> { op },
+                            Ghosted = ghosted,
+                        });
+                    }
                 }
-                break;
+                else
+                {
+                    foreach (var row in oldRows) AddRow(row);
+                }
+                    break;
         }
 
         void AddRow(RowInfo row)
