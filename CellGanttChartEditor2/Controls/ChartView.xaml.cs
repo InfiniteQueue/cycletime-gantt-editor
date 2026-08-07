@@ -26,6 +26,10 @@ public partial class ChartView : UserControl
     /// <summary>How close a drag must land to another bar's end for that end to win over the grid.</summary>
     private const double BarEndSnapWindow = 0.1;
 
+    /// <summary>Grab zone on a bar's trailing edge, and the narrowest bar that gets one.</summary>
+    private const double ResizeGripWidth = 6;
+    private const double MinResizeGripBar = 16;
+
     private const double MinOverlapWidth = 5;
     private const double LinkElbow = 12;
 
@@ -55,6 +59,7 @@ public partial class ChartView : UserControl
     private readonly List<RowInfo> _rows = new();
     private readonly Dictionary<Guid, int> _rowOfOperation = new();
     private readonly List<(Rect Rect, Operation Operation)> _barHits = new();
+    private readonly List<(Rect Rect, Operation Operation)> _resizeHits = new();
     private readonly List<(Point[] Points, OperationLink Link)> _linkHits = new();
     private readonly List<(Rect Rect, RowInfo Row)> _headerHits = new();
     private readonly ToolTip _tip = new()
@@ -77,7 +82,9 @@ public partial class ChartView : UserControl
     private OperationLink? _pressedLink;
     private Point _pressPoint;
     private bool _dragging;
+    private bool _resizing;
     private double _dragOriginalStart;
+    private double _dragOriginalDuration;
     private Operation? _dropTarget;
     private List<Guid>? _chronologicalFreeze;
 
@@ -330,6 +337,7 @@ public partial class ChartView : UserControl
     internal void RenderChart(DrawingContext dc, Size size)
     {
         _barHits.Clear();
+        _resizeHits.Clear();
         _linkHits.Clear();
         _headerHits.Clear();
 
@@ -482,7 +490,7 @@ public partial class ChartView : UserControl
             return;
 
         var top = rowTop(rowIndex);
-        foreach (var band in TimeMath.Bands(_dragOriginalStart, _pressedOperation.Duration, cycle))
+        foreach (var band in TimeMath.Bands(_dragOriginalStart, _dragOriginalDuration, cycle))
         {
             var rect = BandRect(band, top, x);
             if (rect.Width <= 0)
@@ -511,10 +519,12 @@ public partial class ChartView : UserControl
             dc.PushOpacity(Palette.DimmedOpacity);
 
         Rect widest = Rect.Empty;
+        Rect last = Rect.Empty;
         foreach (var band in bands)
         {
             var rect = BandRect(band, top, x);
             _barHits.Add((rect, op));
+            last = rect;
 
             // A selected bar sits inside a white halo, standing in for the old drop shadow.
             if (selected)
@@ -537,6 +547,13 @@ public partial class ChartView : UserControl
 
         if (widest != Rect.Empty && widest.Width > 34)
             DrawBarLabel(dc, op, widest);
+
+        // Resize grip on the trailing edge. The last band always ends at the operation's end,
+        // except for a bar at least a cycle long - there the right edge is the loop boundary, not
+        // the end. Narrow bars are left alone so the grip never swallows the whole bar.
+        if (last.Width >= MinResizeGripBar && op.Duration < cycle - TimeMath.Epsilon)
+            _resizeHits.Add((new Rect(last.Right - ResizeGripWidth, last.Top,
+                ResizeGripWidth, last.Height), op));
 
         if (ghosted)
             dc.Pop();
@@ -786,6 +803,7 @@ public partial class ChartView : UserControl
         }
 
         _pressedOperation = HitBar(position);
+        _resizing = _pressedOperation != null && OnResizeGrip(_pressedOperation, position);
         _pressedLink = _pressedOperation == null ? HitLink(position) : null;
         _pressPoint = position;
 
@@ -795,6 +813,7 @@ public partial class ChartView : UserControl
         if (_pressedOperation != null)
         {
             _dragOriginalStart = _pressedOperation.Start;
+            _dragOriginalDuration = _pressedOperation.Duration;
             Surface.CaptureMouse();
         }
 
@@ -823,12 +842,23 @@ public partial class ChartView : UserControl
             }
 
             var delta = (position.X - _pressPoint.X) / Math.Max(1e-6, _pxPerUnit);
-            var raw = Math.Max(0, _dragOriginalStart + delta);
             var snap = (Keyboard.Modifiers & ModifierKeys.Shift) == 0;
-            var start = Math.Round(SnapStart(_pressedOperation, raw, snap), 3);
-            Document.MoveOperation(_pressedOperation, start);
 
-            _dropTarget = HitBar(position, exclude: _pressedOperation);
+            if (_resizing)
+            {
+                ResizeTo(_pressedOperation, _dragOriginalStart + _dragOriginalDuration + delta, snap);
+                Surface.Cursor = Cursors.SizeWE;
+            }
+            else
+            {
+                var raw = Math.Max(0, _dragOriginalStart + delta);
+                var start = Math.Round(SnapTime(_pressedOperation, raw, snap), 3);
+                Document.MoveOperation(_pressedOperation, start);
+
+                // Dropping onto a bar links the two. Resizing is not that gesture.
+                _dropTarget = HitBar(position, exclude: _pressedOperation);
+            }
+
             RecomputeConflicts();
             Surface.InvalidateVisual();
             return;
@@ -838,11 +868,24 @@ public partial class ChartView : UserControl
     }
 
     /// <summary>
-    /// Snaps a dragged start time. Another bar's end wins when the drag lands within
-    /// <see cref="BarEndSnapWindow"/> of it, so operations can be butted together exactly;
-    /// otherwise the start goes to the nearest whole unit. Shift turns snapping off for a free drag.
+    /// Drags an operation's trailing edge to <paramref name="rawEnd"/>. The start stays put, so any
+    /// link feeding this bar keeps its length; links leaving it drag their targets along as usual.
     /// </summary>
-    private double SnapStart(Operation dragged, double raw, bool snap)
+    private void ResizeTo(Operation op, double rawEnd, bool snap)
+    {
+        if (Document == null)
+            return;
+        var end = Math.Round(SnapTime(op, rawEnd, snap), 3);
+        Document.SetTiming(op, op.Start, Math.Max(0, end - op.Start));
+    }
+
+    /// <summary>
+    /// Snaps whichever edge of a bar is being dragged - its start when moving, its end when
+    /// resizing. Another bar's end wins when the drag lands within <see cref="BarEndSnapWindow"/>
+    /// of it, so operations can be butted together exactly; otherwise the edge goes to the nearest
+    /// whole unit. Shift turns snapping off for a free drag.
+    /// </summary>
+    private double SnapTime(Operation dragged, double raw, bool snap)
     {
         if (!snap || Document == null)
             return raw;
@@ -893,6 +936,7 @@ public partial class ChartView : UserControl
         _pressedOperation = null;
         _pressedLink = null;
         _dragging = false;
+        _resizing = false;
         _dropTarget = null;
         _chronologicalFreeze = null;
 
@@ -942,6 +986,7 @@ public partial class ChartView : UserControl
     {
         base.OnMouseLeave(e);
         HideTip();
+        Surface.Cursor = null;
         if (_hovered != null)
         {
             _hovered = null;
@@ -1030,6 +1075,19 @@ public partial class ChartView : UserControl
         return null;
     }
 
+    /// <summary>
+    /// True when the pointer is on <paramref name="op"/>'s trailing-edge grip. Asking about a
+    /// specific bar rather than searching every grip keeps a bar underneath from stealing the
+    /// gesture from the one actually on top.
+    /// </summary>
+    private bool OnResizeGrip(Operation op, Point position)
+    {
+        foreach (var (rect, candidate) in _resizeHits)
+            if (ReferenceEquals(candidate, op) && rect.Contains(position))
+                return true;
+        return false;
+    }
+
     private OperationLink? HitLink(Point position)
     {
         const double tolerance = 5;
@@ -1066,6 +1124,9 @@ public partial class ChartView : UserControl
         var bar = HitBar(position);
         object? hit = bar;
         hit ??= HitLink(position);
+
+        // Advertise the resize grip before the user commits to a drag.
+        Surface.Cursor = bar != null && OnResizeGrip(bar, position) ? Cursors.SizeWE : null;
 
         if (!ReferenceEquals(hit, _hovered))
         {
