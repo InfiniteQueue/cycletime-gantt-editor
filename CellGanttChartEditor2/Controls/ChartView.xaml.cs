@@ -113,7 +113,6 @@ public partial class ChartView : UserControl
     private double _dragOriginalStart;
     private double _dragOriginalDuration;
     private Operation? _dropTarget;
-    private List<Guid>? _chronologicalFreeze;
 
     private object? _hovered;
     private TextBox? _headerEditor;
@@ -284,7 +283,6 @@ public partial class ChartView : UserControl
 
     private void BuildRows()
     {
-        var oldRows = new List<RowInfo>(_rows);
         _rows.Clear();
         _rowOfOperation.Clear();
         if (Document == null)
@@ -353,29 +351,22 @@ public partial class ChartView : UserControl
                 break;
 
             default:
-                if (_chronologicalFreeze == null)
+                foreach (var op in OrderChronologically())
                 {
-                    foreach (var op in OrderChronologically())
+                    // One row per operation, so a linked operation keeps its row and just fades.
+                    if (filtering && !primary.Contains(op.Id) && !ghosted.Contains(op.Id))
+                        continue;
+                    AddRow(new RowInfo
                     {
-                        // One row per operation, so a linked operation keeps its row and just fades.
-                        if (filtering && !primary.Contains(op.Id) && !ghosted.Contains(op.Id))
-                            continue;
-                        AddRow(new RowInfo
-                        {
-                            Title = op.Name,
-                            Kind = RowKind.Operation,
-                            Single = op,
-                            Key = GanttDocument.KeyOf(op.Id),
-                            Operations = new List<Operation> { op },
-                            Ghosted = ghosted,
-                        });
-                    }
+                        Title = op.Name,
+                        Kind = RowKind.Operation,
+                        Single = op,
+                        Key = GanttDocument.KeyOf(op.Id),
+                        Operations = new List<Operation> { op },
+                        Ghosted = ghosted,
+                    });
                 }
-                else
-                {
-                    foreach (var row in oldRows) AddRow(row);
-                }
-                    break;
+                break;
         }
 
         LayOutLines();
@@ -398,15 +389,12 @@ public partial class ChartView : UserControl
 
         var layout = Document.LayoutFor(GroupMode);
 
-        // Chronological rows are ordered by time, so a manual order has nothing to attach to.
-        var ordered = GroupMode == ChartGroupMode.Chronological
-            ? _rows
-            : _rows
-                .Select((row, natural) => (row, natural))
-                .OrderBy(x => layout.IndexOf(x.row.Key))
-                .ThenBy(x => x.natural)
-                .Select(x => x.row)
-                .ToList();
+        var ordered = _rows
+            .Select((row, natural) => (row, natural))
+            .OrderBy(x => layout.IndexOf(x.row.Key))
+            .ThenBy(x => x.natural)
+            .Select(x => x.row)
+            .ToList();
 
         // Tops are in content space, from zero. The ruler offset and scroll are applied at draw
         // time, so laying out does not have to wait for the scroll to be clamped against a height
@@ -471,24 +459,35 @@ public partial class ChartView : UserControl
     /// <summary>Screen-space top of a line, once the ruler and the scroll are taken into account.</summary>
     private double ScreenTop(Line line) => RulerHeight + line.Top - _scrollY;
 
+    /// <summary>
+    /// The order the "Sort by time" button produces, and the order rows fall into before anything
+    /// has been dragged. It is not applied as bars move: rows only re-sort when asked to, so a bar
+    /// dragged along the axis does not pull its row out from under the pointer.
+    /// </summary>
     private IEnumerable<Operation> OrderChronologically()
     {
         if (Document == null)
             return Array.Empty<Operation>();
 
-        // While dragging, keep the row order fixed so bars do not jump under the cursor.
-        if (_chronologicalFreeze != null)
-        {
-            var order = _chronologicalFreeze;
-            return Document.Operations
-                .OrderBy(o => order.IndexOf(o.Id) is var i && i >= 0 ? i : int.MaxValue)
-                .ToList();
-        }
-
         return Document.Operations
             .OrderBy(o => o.Start)
             .ThenBy(o => o.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Re-sorts the chronological view's rows by start time, writing the result into the manual
+    /// order the view otherwise keeps. Rows inside a group still gather together where the first of
+    /// them lands, so sorting cannot tear a group apart.
+    /// </summary>
+    public void SortChronologically()
+    {
+        if (Document == null || GroupMode != ChartGroupMode.Chronological)
+            return;
+
+        Document.LayoutFor(GroupMode)
+            .SetOrder(OrderChronologically().Select(o => GanttDocument.KeyOf(o.Id)));
+        RaiseEdited();
     }
 
     private string ColorKeyOf(Operation op) => EffectiveColorBy == ChartColorBy.Robot
@@ -1204,7 +1203,6 @@ public partial class ChartView : UserControl
             if (!_dragging)
             {
                 _dragging = true;
-                _chronologicalFreeze = Document.Operations.Select(o => o.Id).ToList();
                 HideTip();
             }
 
@@ -1239,11 +1237,6 @@ public partial class ChartView : UserControl
     /// <summary>
     /// Works out what releasing here would mean: near a row's middle, joining it into a group;
     /// near either end, dropping between rows.
-    ///
-    /// Chronological rows take their order from the operation times, so there is nothing there for
-    /// a reorder to change. The drop-between gesture is still offered when the row being dragged is
-    /// inside a group, because it is the only way back out of one - it just leaves the group rather
-    /// than moving anything.
     /// </summary>
     private void UpdateRowDropTarget(Point position)
     {
@@ -1251,12 +1244,11 @@ public partial class ChartView : UserControl
         _rowDropBefore = -1;
 
         var target = HitHeader(position);
-        var allowBetween = GroupMode != ChartGroupMode.Chronological || DraggingOutOfGroup;
 
         if (target == null)
         {
             // Past the end of the list: drop at the bottom.
-            if (allowBetween && _lines.Count > 0 && position.Y > ScreenTop(_lines[^1]) + _lines[^1].Height)
+            if (_lines.Count > 0 && position.Y > ScreenTop(_lines[^1]) + _lines[^1].Height)
                 _rowDropBefore = _lines.Count;
             Surface.InvalidateVisual();
             return;
@@ -1269,24 +1261,12 @@ public partial class ChartView : UserControl
         var edge = target.Height * ReorderEdgeFraction;
         var index = _lines.IndexOf(target);
 
-        if (allowBetween && position.Y < top + edge)
+        if (position.Y < top + edge)
             _rowDropBefore = index;
-        else if (allowBetween && position.Y > top + target.Height - edge)
+        else if (position.Y > top + target.Height - edge)
             _rowDropBefore = index + 1;
         else
             _rowDropOnto = RefOf(target);
-    }
-
-    /// <summary>True when the row in flight is a group member, so a drop between rows frees it.</summary>
-    private bool DraggingOutOfGroup
-    {
-        get
-        {
-            // Dragging the group's own header is not dragging something out of it.
-            if (Document == null || _pressedHeader is not { GroupId: null, Key: { } key })
-                return false;
-            return Document.LayoutFor(GroupMode).GroupOf(key) != null;
-        }
     }
 
     /// <summary>Applies a released row drag: either a reorder, or a grouping.</summary>
@@ -1310,14 +1290,6 @@ public partial class ChartView : UserControl
         if (before < 0)
         {
             Surface.InvalidateVisual();
-            return;
-        }
-
-        if (GroupMode == ChartGroupMode.Chronological)
-        {
-            // Nothing to reorder here, but the row still comes out of its group and falls back to
-            // its place in time.
-            LeaveGroups(layout, source);
             return;
         }
 
@@ -1350,11 +1322,6 @@ public partial class ChartView : UserControl
             layout.AddToGroup(target, key);
         }
 
-        // Chronological rows are laid out by time and the group gathers its own members anyway, so
-        // writing a manual order there would only leave dead state behind in the saved file.
-        if (GroupMode == ChartGroupMode.Chronological)
-            return;
-
         // Members sit together on screen, so put them together in the order too - after the last
         // one already there, so a row added to a group joins the end of it.
         var order = DisplayedKeys();
@@ -1362,24 +1329,6 @@ public partial class ChartView : UserControl
         var anchor = order.FindLastIndex(k => ContainsKey(target, k));
         order.InsertRange(anchor < 0 ? order.Count : anchor + 1, moving);
         layout.SetOrder(order);
-    }
-
-    /// <summary>Frees the dragged rows from whatever groups hold them, and redraws if any did.</summary>
-    private void LeaveGroups(RowLayout layout, RowRef source)
-    {
-        var left = false;
-        foreach (var key in KeysOf(source))
-        {
-            if (layout.GroupOf(key) == null)
-                continue;
-            layout.LeaveGroup(key);
-            left = true;
-        }
-
-        if (left)
-            RaiseEdited();
-        else
-            Surface.InvalidateVisual();
     }
 
     private void ReorderRow(RowLayout layout, RowRef source, int before)
@@ -1542,7 +1491,6 @@ public partial class ChartView : UserControl
         _dragging = false;
         _resizing = false;
         _dropTarget = null;
-        _chronologicalFreeze = null;
 
         if (!wasDragging || dragged == null || Document == null)
         {

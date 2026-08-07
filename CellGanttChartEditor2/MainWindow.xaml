@@ -137,6 +137,10 @@
                             <ComboBox x:Name="ColorByBox" Width="120" DisplayMemberPath="Text"
                                       Visibility="Collapsed" SelectionChanged="ColorBy_Changed"/>
 
+                            <Button x:Name="SortByTimeButton" Content="Sort by time" Padding="8,2"
+                                    Margin="8,0,0,0" Visibility="Collapsed" Click="SortByTime_Click"
+                                    ToolTip="Re-order the rows by start time. Rows stay where you put them until you press this."/>
+
                             <TextBlock Style="{StaticResource ToolLabel}" Text="Filter by region:"/>
                             <Button Content="Clear filter" Padding="8,2" Click="ClearFilter_Click"/>
                         </StackPanel>

@@ -244,11 +244,15 @@ public partial class MainWindow : Window
 
         Chart.SetGroupMode(option.Value);
 
-        // The colour source is only a free choice when every operation has its own row.
+        // The colour source is only a free choice when every operation has its own row, and sorting
+        // by time only means anything when a row is one operation.
         var chronological = option.Value == ChartGroupMode.Chronological;
         ColorByLabel.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
         ColorByBox.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
+        SortByTimeButton.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private void SortByTime_Click(object sender, RoutedEventArgs e) => Chart.SortChronologically();
 
     private void ColorBy_Changed(object sender, SelectionChangedEventArgs e)
     {
