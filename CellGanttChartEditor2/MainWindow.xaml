@@ -1,0 +1,152 @@
+﻿<Window x:Class="CellGanttChartEditor2.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="clr-namespace:CellGanttChartEditor2.Controls"
+        Title="Cell Gantt Chart Editor" Height="900" Width="1500"
+        WindowStartupLocation="CenterScreen"
+        Style="{StaticResource ThemedWindow}">
+
+    <Window.Resources>
+        <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="MinWidth" Value="70"/>
+        </Style>
+
+        <Style x:Key="ToolToggle" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+            <Setter Property="Margin" Value="0,0,4,0"/>
+        </Style>
+
+        <Style x:Key="ToolLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Foreground" Value="{StaticResource ToolLabelBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="8,0,5,0"/>
+        </Style>
+
+        <!-- Region filter chip. The fill is the colour the region uses everywhere else. -->
+        <Style x:Key="FilterChip" TargetType="ToggleButton">
+            <Setter Property="Margin" Value="0,0,6,4"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chip"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="#60000000" BorderThickness="1"
+                                CornerRadius="3" Padding="9,3" Opacity="0.5">
+                            <TextBlock Text="{TemplateBinding Content}"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       FontWeight="SemiBold"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chip" Property="Opacity" Value="1"/>
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="White"/>
+                                <Setter TargetName="Chip" Property="BorderThickness" Value="2"/>
+                                <Setter TargetName="Chip" Property="Padding" Value="8,2"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+            <WrapPanel Margin="8,6" Orientation="Horizontal">
+                <Button Style="{StaticResource ToolButton}" Content="New" Click="New_Click"/>
+                <Button Style="{StaticResource ToolButton}" Content="Open..." Click="Open_Click"/>
+                <Button Style="{StaticResource ToolButton}" Content="Save" Click="Save_Click"/>
+                <Button Style="{StaticResource ToolButton}" Content="Save as..." Click="SaveAs_Click"/>
+
+                <Separator Margin="7,2" Width="1" Height="22"/>
+
+                <Button Style="{StaticResource ToolButton}" x:Name="ImageButton"
+                        Content="Load image..." Click="LoadImage_Click" MinWidth="100"/>
+                <Button Style="{StaticResource ToolButton}" Content="Fit image" Click="FitImage_Click"/>
+
+                <Separator Margin="7,2" Width="1" Height="22"/>
+
+                <Button Style="{StaticResource ToolButton}" x:Name="AddOperationButton"
+                        Content="Add operation" Click="AddOperation_Click" MinWidth="110"
+                        FontWeight="SemiBold"/>
+
+                <Separator Margin="7,2" Width="1" Height="22"/>
+
+                <TextBlock Style="{StaticResource ToolLabel}" Text="Cycle time:"/>
+                <TextBox x:Name="CycleTimeBox" Width="70" Padding="3" VerticalAlignment="Center"
+                         KeyDown="CycleTime_KeyDown" LostFocus="CycleTime_LostFocus"/>
+
+                <Separator Margin="7,2" Width="1" Height="22"/>
+            </WrapPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <Button x:Name="ConflictButton" Click="Conflicts_Click" Cursor="Hand"
+                        MinWidth="110" Padding="8,2"
+                        ToolTip="Click to list the overlapping pairs">
+                    <TextBlock x:Name="ConflictText" Text="Conflicts: 0" FontWeight="SemiBold"/>
+                </Button>
+            </StatusBarItem>
+            <Separator Width="1" Height="16" Margin="8,0"/>
+            <StatusBarItem Margin="5,5,12,5">
+                <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}"/>
+            </StatusBarItem>
+            <ToggleButton Style="{StaticResource ToolToggle}" x:Name="OverlapToggle"
+                              Content="Highlight conflicts" IsChecked="True"
+                              Checked="OverlapToggle_Changed" Unchecked="OverlapToggle_Changed"/>
+        </StatusBar>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="2*" MinHeight="90"/>
+                <RowDefinition Height="Auto"/>
+                <!-- The filter bar lives inside this row rather than in one of its own, so the
+                     splitter trades space between the image and the chart. With the bar in a
+                     separate auto row the splitter resized that instead, and dragging down grew
+                     both star rows. -->
+                <RowDefinition Height="3*" MinHeight="190"/>
+            </Grid.RowDefinitions>
+
+            <ctl:ImageRegionView x:Name="ImageView" Grid.Row="0"/>
+
+            <GridSplitter Grid.Row="1" Height="6" HorizontalAlignment="Stretch"
+                          VerticalAlignment="Center"/>
+
+            <DockPanel Grid.Row="2">
+                <!-- View mode + region filter, directly above the chart -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1">
+                    <StackPanel Margin="8,6">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Group by:" Margin="0,0,5,0"/>
+                            <ComboBox x:Name="GroupByBox" Width="140" DisplayMemberPath="Text"
+                                      SelectionChanged="GroupBy_Changed"/>
+
+                            <TextBlock x:Name="ColorByLabel" Style="{StaticResource ToolLabel}"
+                                       Text="Colour by:" Visibility="Collapsed"/>
+                            <ComboBox x:Name="ColorByBox" Width="120" DisplayMemberPath="Text"
+                                      Visibility="Collapsed" SelectionChanged="ColorBy_Changed"/>
+
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Filter by region:"/>
+                            <Button Content="Clear filter" Padding="8,2" Click="ClearFilter_Click"/>
+                        </StackPanel>
+
+                        <WrapPanel x:Name="FilterPanel"/>
+                    </StackPanel>
+                </Border>
+
+                <ctl:ChartView x:Name="Chart"/>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>
