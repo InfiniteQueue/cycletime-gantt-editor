@@ -50,6 +50,14 @@ public partial class ChartView : UserControl
     /// <summary>Fraction of a row's height at each end that means "drop between" rather than "group".</summary>
     private const double ReorderEdgeFraction = 0.3;
 
+    /// <summary>
+    /// How far ctrl+wheel may stretch or squash the rows. The floor keeps a row tall enough to still
+    /// carry a readable label and a grabbable bar; the ceiling is about as far as anyone needs to go
+    /// to pick apart a busy row.
+    /// </summary>
+    private const double MinRowZoom = 0.5;
+    private const double MaxRowZoom = 2.5;
+
     private static readonly Brush SurfaceBrush = Palette.Brush(Palette.ChartSurface);
     private static readonly Brush RowBrushA = Palette.Brush(Palette.RowA);
     private static readonly Brush RowBrushB = Palette.Brush(Palette.RowB);
@@ -97,10 +105,19 @@ public partial class ChartView : UserControl
     };
 
     private double _zoom = 1;
+
+    /// <summary>Vertical zoom, from ctrl+wheel. Everything measured down the page scales by this.</summary>
+    private double _rowZoom = 1;
     private double _scrollX;
     private double _scrollY;
     private double _pxPerUnit = 1;
     private bool _updatingScrollBars;
+
+    private double RowPitch => RowHeight * _rowZoom;
+    private double BarMargin => BarInset * _rowZoom;
+
+    /// <summary>Text sized with the rows, floored so a squashed chart is still readable.</summary>
+    private double Scaled(double fontSize) => Math.Clamp(fontSize * _rowZoom, 8.5, fontSize * 1.5);
 
     private Operation? _selectedOperation;
     private OperationLink? _selectedLink;
@@ -410,7 +427,7 @@ public partial class ChartView : UserControl
             var group = layout.GroupOf(row.Key);
             if (group == null)
             {
-                Add(new Line { Row = row, Height = RowHeight });
+                Add(new Line { Row = row, Height = RowPitch });
                 continue;
             }
 
@@ -422,7 +439,7 @@ public partial class ChartView : UserControl
             var groupLine = new Line
             {
                 Group = group,
-                Height = group.Collapsed ? CollapsedGroupHeight : GroupStripHeight,
+                Height = (group.Collapsed ? CollapsedGroupHeight : GroupStripHeight) * _rowZoom,
                 Contents = members.SelectMany(m => m.Operations).ToList(),
             };
             Add(groupLine);
@@ -436,7 +453,7 @@ public partial class ChartView : UserControl
             }
 
             foreach (var member in members)
-                Add(new Line { Row = member, Height = RowHeight, Nested = true });
+                Add(new Line { Row = member, Height = RowPitch, Nested = true });
         }
 
         void Add(Line line)
@@ -578,7 +595,8 @@ public partial class ChartView : UserControl
             }
 
             foreach (var op in line.Row!.Operations)
-                DrawBar(dc, op, top, line.Row.Ghosted.Contains(op.Id) && RegionFilter.Count > 0, X, cycle);
+                DrawBar(dc, op, top, line.Height,
+                    line.Row.Ghosted.Contains(op.Id) && RegionFilter.Count > 0, X, cycle);
         }
 
         DrawLinks(dc, X, cycle);
@@ -675,13 +693,14 @@ public partial class ChartView : UserControl
         var bands = TimeMath.Merge(line.Contents
             .SelectMany(op => TimeMath.Bands(op.Start, op.Duration, cycle)));
 
-        var height = line.Height - BarInset * 2 + 2;
+        var inset = Math.Min(BarMargin, line.Height / 3);
+        var height = line.Height - inset * 2 + 2;
         foreach (var band in bands)
         {
             var left = x(band.From);
             var width = Math.Max(2, x(band.To) - left);
             dc.DrawRoundedRectangle(GroupBlockBrush, GroupBlockPen,
-                new Rect(left, top + BarInset - 1, width, Math.Max(2, height)),
+                new Rect(left, top + inset - 1, width, Math.Max(2, height)),
                 BarCornerRadius, BarCornerRadius);
         }
     }
@@ -697,12 +716,15 @@ public partial class ChartView : UserControl
         if (IsBeingDragged(line))
             dc.DrawRectangle(DraggedRowBrush, null, rect);
 
-        var chevron = new Rect(4, rect.Top + (rect.Height - ChevronBox) / 2, ChevronBox, ChevronBox);
+        // The chevron cannot outgrow the strip it sits in, which is what limits it when the rows
+        // are zoomed right down.
+        var box = Math.Min(ChevronBox, rect.Height - 2);
+        var chevron = new Rect(4, rect.Top + (rect.Height - box) / 2, box, box);
         _chevronHits.Add((chevron, group));
         DrawChevron(dc, chevron, group.Collapsed);
 
         var count = group.Members.Count;
-        var text = Text($"{group.Name}  ({count})", 11.5, TextBrush, BoldFace);
+        var text = Text($"{group.Name}  ({count})", Scaled(11.5), TextBrush, BoldFace);
         text.MaxTextWidth = Math.Max(20, HeaderWidth - chevron.Right - 10);
         text.MaxLineCount = 1;
         text.Trimming = TextTrimming.CharacterEllipsis;
@@ -714,7 +736,7 @@ public partial class ChartView : UserControl
     {
         var cx = box.Left + box.Width / 2;
         var cy = box.Top + box.Height / 2;
-        const double r = 3.6;
+        var r = box.Width * 0.225;
 
         var geometry = new StreamGeometry();
         using (var ctx = geometry.Open())
@@ -777,7 +799,7 @@ public partial class ChartView : UserControl
             if (line.Nested)
                 dc.DrawRectangle(GroupBandBrush, null, new Rect(0, top, GroupIndent - 4, line.Height));
 
-            var text = Text(row.Title, 12.5, TextBrush, BoldFace);
+            var text = Text(row.Title, Scaled(12.5), TextBrush, BoldFace);
             text.MaxTextWidth = Math.Max(20, HeaderWidth - 16 - indent);
             text.MaxLineCount = 1;
             text.Trimming = TextTrimming.CharacterEllipsis;
@@ -820,24 +842,31 @@ public partial class ChartView : UserControl
         if (!_rowOfOperation.TryGetValue(_pressedOperation.Id, out var lineIndex))
             return;
 
-        var top = ScreenTop(_lines[lineIndex]);
+        var line = _lines[lineIndex];
+        var top = ScreenTop(line);
         foreach (var band in TimeMath.Bands(_dragOriginalStart, _dragOriginalDuration, cycle))
         {
-            var rect = BandRect(band, top, x);
+            var rect = BandRect(band, top, line.Height, x);
             if (rect.Width <= 0)
                 continue;
             dc.DrawRoundedRectangle(null, GhostPen, rect, BarCornerRadius, BarCornerRadius);
         }
     }
 
-    private static Rect BandRect((double From, double To) band, double top, Func<double, double> x)
+    /// <summary>
+    /// A bar's rectangle inside its line. The height comes from the line rather than the constant,
+    /// so a bar tracks the vertical zoom - and stays inside a group's own shorter line.
+    /// </summary>
+    private Rect BandRect((double From, double To) band, double top, double lineHeight,
+        Func<double, double> x)
     {
         var left = x(band.From);
         var right = x(band.To);
-        return new Rect(left, top + BarInset, Math.Max(2, right - left), RowHeight - BarInset * 2);
+        var inset = Math.Min(BarMargin, lineHeight / 3);
+        return new Rect(left, top + inset, Math.Max(2, right - left), Math.Max(2, lineHeight - inset * 2));
     }
 
-    private void DrawBar(DrawingContext dc, Operation op, double top, bool ghosted,
+    private void DrawBar(DrawingContext dc, Operation op, double top, double lineHeight, bool ghosted,
         Func<double, double> x, double cycle)
     {
         var key = ColorKeyOf(op);
@@ -853,7 +882,7 @@ public partial class ChartView : UserControl
         Rect last = Rect.Empty;
         foreach (var band in bands)
         {
-            var rect = BandRect(band, top, x);
+            var rect = BandRect(band, top, lineHeight, x);
             _barHits.Add((rect, op));
             last = rect;
 
@@ -924,7 +953,7 @@ public partial class ChartView : UserControl
     /// </summary>
     private void DrawBarLabel(DrawingContext dc, Operation op, Rect rect)
     {
-        var text = Text(LabelOf(op), 11.5, Brushes.Black, BoldFace);
+        var text = Text(LabelOf(op), Scaled(11.5), Brushes.Black, BoldFace);
         text.MaxTextWidth = Math.Max(8, rect.Width - 8);
         text.MaxLineCount = 1;
         text.Trimming = TextTrimming.CharacterEllipsis;
@@ -986,7 +1015,7 @@ public partial class ChartView : UserControl
     }
 
     /// <summary>Orthogonal route from a source end to a target start, always arriving from the left.</summary>
-    private static Point[] Route(Point from, Point to)
+    private Point[] Route(Point from, Point to)
     {
         if (to.X > from.X + LinkElbow * 2)
         {
@@ -995,7 +1024,7 @@ public partial class ChartView : UserControl
         }
 
         // Target sits left of the source (usually because one of them wrapped): detour around.
-        var midY = (from.Y + to.Y) / 2 + (Math.Abs(to.Y - from.Y) < 1 ? RowHeight / 2 - 2 : 0);
+        var midY = (from.Y + to.Y) / 2 + (Math.Abs(to.Y - from.Y) < 1 ? RowPitch / 2 - 2 : 0);
         return new[]
         {
             from,
@@ -1056,7 +1085,7 @@ public partial class ChartView : UserControl
             VScroll.Maximum = maxY;
             VScroll.ViewportSize = viewportH;
             VScroll.LargeChange = viewportH * 0.9;
-            VScroll.SmallChange = RowHeight;
+            VScroll.SmallChange = RowPitch;
             VScroll.Value = Math.Clamp(_scrollY, 0, maxY);
             VScroll.Visibility = maxY > 0.5 ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -1091,9 +1120,19 @@ public partial class ChartView : UserControl
 
         var position = e.GetPosition(Surface);
 
+        // Ctrl+wheel stretches or squashes the rows, pinned to the row under the cursor so the
+        // thing being looked at stays put. Offered over the headers too, since that is as much
+        // "the chart" as the bars are.
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            ZoomRows(e.Delta > 0 ? 1.15 : 1 / 1.15, position.Y);
+            e.Handled = true;
+            return;
+        }
+
         if (position.X < HeaderWidth)
         {
-            _scrollY = Math.Max(0, _scrollY - Math.Sign(e.Delta) * RowHeight);
+            _scrollY = Math.Max(0, _scrollY - Math.Sign(e.Delta) * RowPitch);
             Surface.InvalidateVisual();
             e.Handled = true;
             return;
@@ -1112,6 +1151,23 @@ public partial class ChartView : UserControl
 
         Surface.InvalidateVisual();
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// One step of vertical zoom, keeping whatever sits at <paramref name="pointerY"/> under the
+    /// pointer. Scrolling by the same factor as the rows grow is what pins it: content space
+    /// stretches about its own origin, so the offset has to stretch with it.
+    /// </summary>
+    private void ZoomRows(double factor, double pointerY)
+    {
+        var previous = _rowZoom;
+        _rowZoom = Math.Clamp(_rowZoom * factor, MinRowZoom, MaxRowZoom);
+        if (Math.Abs(_rowZoom - previous) < 1e-9)
+            return;
+
+        var above = pointerY - RulerHeight;
+        _scrollY = Math.Max(0, (_scrollY + above) * (_rowZoom / previous) - above);
+        Surface.InvalidateVisual();
     }
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
@@ -1784,17 +1840,20 @@ public partial class ChartView : UserControl
     {
         CommitHeaderEditor();
 
+        // The box has to fit the line it sits on, which the vertical zoom can make short.
+        var height = Math.Min(24, Math.Max(14, rect.Height - 2));
+
         _headerEditorLine = line;
         _headerEditor = new TextBox
         {
             Text = line.Group?.Name ?? line.Row?.Title ?? string.Empty,
             Width = rect.Width - 8,
-            Height = 24,
+            Height = height,
             Padding = new Thickness(2),
         };
 
         Canvas.SetLeft(_headerEditor, rect.Left + 4);
-        Canvas.SetTop(_headerEditor, rect.Top + (rect.Height - 24) / 2);
+        Canvas.SetTop(_headerEditor, rect.Top + (rect.Height - height) / 2);
         Overlay.Children.Add(_headerEditor);
 
         _headerEditor.KeyDown += (_, e) =>
