@@ -57,7 +57,7 @@ public static class Palette
     /// </summary>
     public static Pen[] GlowPens(double innerThickness) => new[]
     {
-        Pen(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF), innerThickness + 10),
+        //Pen(Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF), innerThickness + 10),
         Pen(Color.FromArgb(0x46, 0xFF, 0xFF, 0xFF), innerThickness + 6),
         Pen(Color.FromArgb(0x78, 0xFF, 0xFF, 0xFF), innerThickness + 3),
     };
