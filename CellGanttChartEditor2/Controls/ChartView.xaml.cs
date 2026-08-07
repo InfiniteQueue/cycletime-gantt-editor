@@ -18,6 +18,10 @@ namespace CellGanttChartEditor2.Controls;
 public partial class ChartView : UserControl
 {
     private const double HeaderWidth = 168;
+
+    /// <summary>Narrowest strip of chart worth drawing beside the row headers.</summary>
+    private const double MinChartWidth = 40;
+
     private const double RulerHeight = 28;
     private const double RowHeight = 38;
     private const double BarInset = 6;
@@ -343,8 +347,15 @@ public partial class ChartView : UserControl
 
         dc.DrawRectangle(SurfaceBrush, null, new Rect(size));
 
-        if (Document == null || size.Width < 40 || size.Height < 40)
+        // Everything below assumes there is room for the header column plus a usable strip of
+        // chart beside it. Without that check the clip and ruler rects get a negative width, which
+        // throws out of OnRender and takes the app down with it.
+        if (Document == null || size.Width < HeaderWidth + MinChartWidth || size.Height < 40)
+        {
+            HScroll.Visibility = Visibility.Collapsed;
+            VScroll.Visibility = Visibility.Collapsed;
             return;
+        }
 
         BuildRows();
 
