@@ -3,20 +3,30 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using CellGanttChartEditor2.Dialogs;
 using CellGanttChartEditor2.Models;
 using CellGanttChartEditor2.Services;
 
 namespace CellGanttChartEditor2.Controls;
 
 /// <summary>
-/// The side panel's contents: every region and robot the document currently holds, each expandable
-/// into its own property editor. Cards are built by hand rather than bound, in keeping with the rest
-/// of the app, and rebuilt whenever the document changes - so which cards were open is remembered by
-/// key rather than by control.
+/// The side panel's contents: every region, robot and operation the document currently holds, each
+/// expandable into its own property editor. Cards are built by hand rather than bound, in keeping
+/// with the rest of the app, and rebuilt whenever the document changes - so which cards were open is
+/// remembered by key rather than by control.
 /// </summary>
 public partial class ItemListView : UserControl
 {
     private static readonly Thickness FieldMargin = new(0, 3, 0, 3);
+
+    /// <summary>Stands for one entry in an operation's region list. Null is "(No region)".</summary>
+    private sealed record RegionChoice(Guid? Id, string Text)
+    {
+        public override string ToString() => Text;
+    }
+
+    private const string NoRegionText = "(No region)";
+    private const string NoRobotText = "(No robot)";
 
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
 
@@ -49,19 +59,28 @@ public partial class ItemListView : UserControl
 
     public event EventHandler? AddRobotRequested;
 
+    /// <summary>The user asked for a new operation, which is the host's add-operation flow.</summary>
+    public event EventHandler? AddOperationRequested;
+
     /// <summary>The user asked to delete an item. The host confirms; this panel does not.</summary>
     public event EventHandler<ChartRegion>? DeleteRegionRequested;
 
     public event EventHandler<string>? DeleteRobotRequested;
+
+    public event EventHandler<Operation>? DeleteOperationRequested;
 
     /// <summary>Opens an item's editor, so a newly added one lands ready to be named.</summary>
     public void ExpandRegion(ChartRegion region) => _expanded.Add(RegionKey(region));
 
     public void ExpandRobot(string name) => _expanded.Add(RobotKey(name));
 
+    public void ExpandOperation(Operation op) => _expanded.Add(OperationKey(op));
+
     private static string RegionKey(ChartRegion region) => "region:" + region.Id.ToString("N");
 
     private static string RobotKey(string name) => "robot:" + name;
+
+    private static string OperationKey(Operation op) => "operation:" + op.Id.ToString("N");
 
     /// <summary>Rebuilds every card from the document. Cheap enough to do on any change.</summary>
     public void Rebuild()
@@ -73,8 +92,10 @@ public partial class ItemListView : UserControl
 
             var regions = Document?.Regions ?? new List<ChartRegion>();
             var robots = Document?.Robots() ?? new List<string>();
+            var operations = Document?.Operations ?? new List<Operation>();
 
-            SummaryText.Text = $"{regions.Count} regions, {robots.Count} robots";
+            SummaryText.Text = $"{regions.Count} regions, {robots.Count} robots, " +
+                               $"{operations.Count} operations";
 
             AddHeading("Regions", "Add region", () => AddRegionRequested?.Invoke(this, EventArgs.Empty));
             if (regions.Count == 0)
@@ -87,6 +108,12 @@ public partial class ItemListView : UserControl
                 AddEmptyNote("No robots yet.");
             foreach (var robot in robots)
                 ItemHost.Children.Add(RobotCard(robot));
+
+            AddHeading("Operations", "Add operation", () => AddOperationRequested?.Invoke(this, EventArgs.Empty));
+            if (operations.Count == 0)
+                AddEmptyNote("No operations yet.");
+            foreach (var op in operations)
+                ItemHost.Children.Add(OperationCard(op));
         }
         finally
         {
@@ -196,6 +223,110 @@ public partial class ItemListView : UserControl
 
         return Card(key, RobotColors.GetBrush(robot), robot,
             used == 1 ? "1 operation" : $"{used} operations", details);
+    }
+
+    /// <summary>
+    /// An operation's card. Everything about it can be changed from here, including which robot and
+    /// which region it belongs to - and either of those may be nothing at all, so both lists carry an
+    /// entry for that.
+    /// </summary>
+    private FrameworkElement OperationCard(Operation op)
+    {
+        var key = OperationKey(op);
+        var region = Document?.RegionOf(op);
+
+        var details = new StackPanel();
+
+        var name = Field(details, "Name", new TextBox { Text = op.Name });
+        Commit(name, () =>
+        {
+            var value = name.Text.Trim();
+            if (value.Length == 0 || value == op.Name)
+                return;
+            op.Name = value;
+            RaiseEdited();
+        });
+
+        // Editable, so an operation can be given a robot the document has never heard of - the same
+        // way the add-operation dialog does it. A robot is named, not chosen from a fixed list.
+        var robot = Field(details, "Robot", new ComboBox
+        {
+            IsEditable = true,
+            ItemsSource = new[] { NoRobotText }.Concat(Document?.Robots() ?? new List<string>()).ToList(),
+            Text = op.HasRobot ? op.RobotName : NoRobotText,
+        });
+        Commit(robot, () =>
+        {
+            // Clearing the box says the same thing as picking the entry at the top of the list.
+            var value = robot.Text.Trim();
+            if (value == NoRobotText)
+                value = string.Empty;
+            if (string.Equals(value, op.RobotName, StringComparison.Ordinal))
+                return;
+            op.RobotName = value;
+            RaiseEdited();
+        });
+
+        var regionBox = Field(details, "Region", new ComboBox { ItemsSource = RegionChoices() });
+        regionBox.SelectedItem = ((List<RegionChoice>)regionBox.ItemsSource)
+            .FirstOrDefault(c => c.Id == (op.HasRegion ? op.RegionId : (Guid?)null));
+        regionBox.SelectionChanged += (_, _) =>
+        {
+            if (_building || regionBox.SelectedItem is not RegionChoice choice)
+                return;
+            var chosen = choice.Id ?? Guid.Empty;
+            if (chosen == op.RegionId)
+                return;
+            op.RegionId = chosen;
+            RaiseEdited();
+        };
+
+        var start = Field(details, "Start time", new TextBox { Text = TimeMath.Format(op.Start) });
+        var duration = Field(details, "Duration", new TextBox { Text = TimeMath.Format(op.Duration) });
+
+        // Timing goes through the document so links behave exactly as they do when a bar is dragged.
+        void ApplyTiming()
+        {
+            if (Document == null)
+                return;
+
+            if (!OperationDialog.TryParse(start.Text, out var startValue) ||
+                !OperationDialog.TryParse(duration.Text, out var durationValue) || durationValue <= 0)
+            {
+                start.Text = TimeMath.Format(op.Start);
+                duration.Text = TimeMath.Format(op.Duration);
+                return;
+            }
+
+            if (Math.Abs(startValue - op.Start) < TimeMath.Epsilon &&
+                Math.Abs(durationValue - op.Duration) < TimeMath.Epsilon)
+                return;
+
+            Document.EditTiming(op, startValue, durationValue);
+            RaiseEdited();
+        }
+
+        Commit(start, ApplyTiming);
+        Commit(duration, ApplyTiming);
+
+        details.Children.Add(Actions(Delete(() => DeleteOperationRequested?.Invoke(this, op))));
+
+        var swatch = op.HasRegion && region != null ? RegionColors.GetBrush(region.ColorKey)
+            : op.HasRobot ? RobotColors.GetBrush(op.RobotName)
+            : Palette.Brush(Palette.GroupBlock);
+
+        var subtitle = $"{(op.HasRobot ? op.RobotName : NoRobotText)} - {region?.Name ?? NoRegionText}, " +
+                       $"{TimeMath.Format(op.Start)} for {TimeMath.Format(op.Duration)}";
+
+        return Card(key, swatch, op.Name, subtitle, details);
+    }
+
+    private List<RegionChoice> RegionChoices()
+    {
+        var choices = new List<RegionChoice> { new(null, NoRegionText) };
+        if (Document != null)
+            choices.AddRange(Document.Regions.Select(r => new RegionChoice(r.Id, r.Name)));
+        return choices;
     }
 
     /// <summary>The row of buttons at the foot of an editor. Delete is pushed to the far end.</summary>
@@ -405,10 +536,18 @@ public partial class ItemListView : UserControl
     }
 
     /// <summary>Applies a text edit on Enter or when the box loses focus, the way the toolbar does.</summary>
-    private static void Commit(TextBox box, Action apply)
+    private static void Commit(TextBox box, Action apply) => Commit((Control)box, apply);
+
+    /// <summary>
+    /// The same contract for an editable combo box, selection included: choosing from the list only
+    /// fills the text in, so the change lands when the box is left, exactly as a typed one does.
+    /// </summary>
+    private static void Commit(ComboBox box, Action apply) => Commit((Control)box, apply);
+
+    private static void Commit(Control control, Action apply)
     {
-        box.LostFocus += (_, _) => apply();
-        box.KeyDown += (_, e) =>
+        control.LostFocus += (_, _) => apply();
+        control.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Enter)
                 return;

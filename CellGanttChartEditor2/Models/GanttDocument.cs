@@ -47,10 +47,13 @@ public sealed class GanttDocument
     public static string KeyOf(Guid id) => id.ToString("N");
 
     /// <summary>
-    /// Row key for the chart's catch-all row of operations belonging to no region. It is a real row
-    /// the user can order and group, so the layouts have to treat it as a live key.
+    /// Row keys for the chart's catch-all rows: operations belonging to no region, and operations
+    /// carried out by no robot. They are real rows the user can order and group, so the layouts have
+    /// to treat them as live keys.
     /// </summary>
     public const string NoRegionKey = "no-region";
+
+    public const string NoRobotKey = "no-robot";
 
     /// <summary>Raw bytes of the embedded reference image (whatever format the user picked).</summary>
     public byte[]? ImageData { get; set; }
@@ -76,14 +79,15 @@ public sealed class GanttDocument
 
     /// <summary>
     /// Every robot the document knows: those an operation names, in first-use order, followed by any
-    /// registered without work yet - one added through the items panel and not used since.
+    /// registered without work yet - one added through the items panel and not used since. An
+    /// operation with no robot names none, so it contributes nothing here.
     /// </summary>
     public List<string> Robots()
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new List<string>();
         foreach (var op in Operations)
-            if (seen.Add(op.RobotName))
+            if (op.HasRobot && seen.Add(op.RobotName))
                 list.Add(op.RobotName);
         foreach (var robot in RobotDetails)
             if (seen.Add(robot.Name))
@@ -200,6 +204,10 @@ public sealed class GanttDocument
     /// <summary>Deletes a robot, and with it every operation it was carrying out.</summary>
     public void RemoveRobot(string name)
     {
+        // "No robot" is not a robot: it must never be treated as one whose work can be deleted.
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
         foreach (var op in Operations
                      .Where(o => string.Equals(o.RobotName, name, StringComparison.OrdinalIgnoreCase))
                      .ToList())
@@ -230,7 +238,7 @@ public sealed class GanttDocument
     /// <summary>Clears row order and group entries that no longer name a live row.</summary>
     public void PruneLayouts()
     {
-        RobotRows.Prune(Robots());
+        RobotRows.Prune(Robots().Append(NoRobotKey).ToList());
         RegionRows.Prune(Regions.Select(r => KeyOf(r.Id)).Append(NoRegionKey).ToList());
         OperationRows.Prune(Operations.Select(o => KeyOf(o.Id)).ToList());
     }
@@ -351,7 +359,8 @@ public sealed class GanttDocument
 
     public void RenameRobot(string oldName, string newName)
     {
-        if (string.IsNullOrWhiteSpace(newName))
+        // Renaming from nothing would sweep every robotless operation onto one robot.
+        if (string.IsNullOrWhiteSpace(newName) || string.IsNullOrWhiteSpace(oldName))
             return;
         foreach (var op in Operations.Where(o => string.Equals(o.RobotName, oldName, StringComparison.OrdinalIgnoreCase)))
             op.RobotName = newName;

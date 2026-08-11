@@ -37,14 +37,20 @@ which is why the draft holds the numeric fields as text.
   is its registration: created when the user adds a robot or places one on the image, and removed
   only by deleting the robot outright. A robot that was never registered goes when its last
   operation does.
-- **An operation requires a robot; a region is optional.** `Operation.RegionId` is `Guid.Empty` for
-  none - test with `Operation.HasRegion`. Region-less operations gather in a "(No region)" row when
-  the chart's rows are regions, and take a neutral fill when colouring by region.
+- **An operation needs neither a robot nor a region.** `Operation.RegionId` is `Guid.Empty` for none
+  and `RobotName` is empty for none - test with `Operation.HasRegion` and `Operation.HasRobot`. Each
+  kind gathers in a catch-all row - "(No region)" or "(No robot)" - when the chart's rows are the
+  thing it lacks, and takes a neutral fill when the colouring is keyed on it. Neither catch-all is an
+  item: they cannot be renamed, and two operations that both lack the same thing do not conflict over
+  it. Only the name and the timing are required.
 - **A region need not have an area.** `ChartRegion.Bounds` may be empty - test with
   `ChartRegion.HasArea`. Such a region is not drawn on the image but is a region in every other way.
-- **Regions and robots are added and deleted deliberately**, through the items panel. Nothing is
-  pruned automatically because it became empty; deleting one takes the operations defined against it
-  (and their links) with it.
+- **Regions, robots and operations are added and deleted deliberately**, through the items panel.
+  Nothing is pruned automatically because it became empty; deleting a region or a robot takes the
+  operations defined against it (and their links) with it.
+- **An operation is renamed from the items panel or by double-clicking it.** Double-clicking a bar
+  opens `BarEditDialog`, which is where the name lives alongside the timing; double-clicking a row
+  header renames the row, which in the chronological view is the operation itself.
 - Start times are absolute and are never rewritten when the cycle time changes. Only the drawing
   wraps.
 

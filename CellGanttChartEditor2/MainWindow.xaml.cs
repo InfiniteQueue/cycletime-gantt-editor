@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private GanttDocument _document = new();
     private string? _path;
     private bool _suppressChanges;
+    private bool _addingOperation;
 
     public MainWindow()
     {
@@ -55,8 +56,10 @@ public partial class MainWindow : Window
         Items.PlaceRobotRequested += Items_PlaceRobotRequested;
         Items.AddRegionRequested += Items_AddRegionRequested;
         Items.AddRobotRequested += Items_AddRobotRequested;
+        Items.AddOperationRequested += (_, _) => AddOperation();
         Items.DeleteRegionRequested += Items_DeleteRegionRequested;
         Items.DeleteRobotRequested += Items_DeleteRobotRequested;
+        Items.DeleteOperationRequested += Items_DeleteOperationRequested;
 
         GroupByBox.ItemsSource = ViewOptions.GroupModes;
         GroupByBox.SelectedIndex = 0;
@@ -361,6 +364,25 @@ public partial class MainWindow : Window
         RefreshAll();
     }
 
+    /// <summary>
+    /// Deleting an operation takes its links with it, which the user cannot see from the panel - so
+    /// they are counted into the question rather than sprung afterwards.
+    /// </summary>
+    private void Items_DeleteOperationRequested(object? sender, Operation op)
+    {
+        var links = _document.LinksInvolving(op.Id).Count();
+        var message = links == 0
+            ? $"Delete the operation \"{op.Name}\"?"
+            : $"Delete the operation \"{op.Name}\", and the {links} link{(links == 1 ? "" : "s")} attached to it?";
+
+        if (MessageBox.Show(this, message, "Delete", MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning) != MessageBoxResult.OK)
+            return;
+
+        _document.RemoveOperation(op);
+        RefreshAll();
+    }
+
     private void Items_DeleteRobotRequested(object? sender, string robot)
     {
         var used = _document.Operations.Count(o =>
@@ -470,8 +492,16 @@ public partial class MainWindow : Window
     /// way, so the dialog closes, the pick runs, and it reopens on the same draft - which is why
     /// this is a loop rather than a single ShowDialog.
     /// </summary>
-    private async void AddOperation_Click(object sender, RoutedEventArgs e)
+    private void AddOperation_Click(object sender, RoutedEventArgs e) => AddOperation();
+
+    private async void AddOperation()
     {
+        // Two ways in now - the toolbar and the items panel - and the flow lets go of the UI while a
+        // pick runs, so re-entry has to be shut out here rather than by disabling one button.
+        if (_addingOperation)
+            return;
+
+        _addingOperation = true;
         AddOperationButton.IsEnabled = false;
         try
         {
@@ -496,6 +526,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _addingOperation = false;
             AddOperationButton.IsEnabled = true;
         }
     }
@@ -554,7 +585,8 @@ public partial class MainWindow : Window
             Duration = duration,
         });
 
-        if (draft.RobotLocation is { } at)
+        // No name, no robot: there is nothing to register a place against.
+        if (draft.RobotLocation is { } at && draft.RobotName.Length > 0)
             _document.RobotDetail(draft.RobotName).Location = at;
     }
 

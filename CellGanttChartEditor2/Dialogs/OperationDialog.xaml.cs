@@ -6,9 +6,9 @@ using CellGanttChartEditor2.Models;
 namespace CellGanttChartEditor2.Dialogs;
 
 /// <summary>
-/// Collects everything needed to define an operation. A robot and a name are required; a region is
-/// not, and one chosen here may be an existing region, a box drawn on the image, or a brand new
-/// region with no area at all.
+/// Collects everything needed to define an operation. The name and the timing are required; the
+/// robot and the region are not, and a region chosen here may be an existing one, a box drawn on the
+/// image, or a brand new region with no area at all.
 ///
 /// Picking anything on the image closes this dialog - it has to get out of the way of the image -
 /// and the host reopens it on the same <see cref="OperationDraft"/> with the answer filled in.
@@ -40,7 +40,8 @@ public partial class OperationDialog : Window
         _document = document;
         Draft = draft;
 
-        HeaderText.Text = "New operation. A robot is required; a region is optional.";
+        HeaderText.Text = "New operation. Only the name and the timing are required - leave the " +
+                          "robot or the region blank for work that has neither.";
 
         CategoryBox.ItemsSource = RegionCategoryInfo.Options;
         RobotBox.ItemsSource = document.Robots();
@@ -160,12 +161,6 @@ public partial class OperationDialog : Window
     private void Ok_Click(object sender, RoutedEventArgs e)
     {
         Capture();
-
-        if (Draft.RobotName.Length == 0)
-        {
-            Fail("Give the robot a name - every operation is carried out by one.");
-            return;
-        }
 
         if (Draft.OperationName.Length == 0)
         {

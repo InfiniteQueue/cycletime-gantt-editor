@@ -77,7 +77,8 @@ public partial class ChartView : UserControl
     private static readonly Pen GhostPen = MakeGhostPen();
     private static readonly Brush GroupBandBrush = Palette.Brush(Palette.GroupBand);
     private static readonly Brush GroupBlockBrush = Palette.Brush(Palette.GroupBlock);
-    private static readonly Brush NoRegionBrush = Palette.Brush(Palette.GroupBlock);
+    /// <summary>Fill for a bar the current colour source has no key for - no region, or no robot.</summary>
+    private static readonly Brush UnassignedBrush = Palette.Brush(Palette.GroupBlock);
     private static readonly Pen GroupEdgePen = Palette.Pen(Palette.GroupEdge, 1);
     private static readonly Pen GroupBlockPen = Palette.Pen(Palette.BarOutline, 1);
     private static readonly Pen DropIndicatorPen = Palette.Pen(Palette.DropIndicator, 3);
@@ -367,6 +368,19 @@ public partial class ChartView : UserControl
                         Ghosted = ghosted,
                     });
                 }
+
+                // Work no robot carries out still has to appear somewhere in a view whose rows are
+                // robots, so it gathers in a row of its own at the end.
+                var unmanned = Document.Operations.Where(o => !o.HasRobot).ToList();
+                if (unmanned.Count > 0 && (!filtering || unmanned.Any(o => primary.Contains(o.Id))))
+                    AddRow(new RowInfo
+                    {
+                        Title = "(No robot)",
+                        Kind = RowKind.Robot,
+                        Key = GanttDocument.NoRobotKey,
+                        Operations = unmanned.Where(Keep).ToList(),
+                        Ghosted = ghosted,
+                    });
                 break;
 
             case ChartGroupMode.Robot:
@@ -540,20 +554,15 @@ public partial class ChartView : UserControl
         RaiseEdited();
     }
 
-    private string ColorKeyOf(Operation op) => EffectiveColorBy == ChartColorBy.Robot
-        ? op.RobotName
-        : Document?.RegionOf(op)?.ColorKey ?? string.Empty;
-
-    private ColorAllocator Allocator => EffectiveColorBy == ChartColorBy.Robot ? RobotColors : RegionColors;
-
     /// <summary>
-    /// A bar's fill. Colouring by region leaves an operation that has no region without a key to
-    /// allocate against, so it takes the neutral fill rather than borrowing some region's colour.
+    /// A bar's fill. Whichever way the chart is coloured, an operation may have nothing to allocate
+    /// against - no region, or no robot - and then it takes the neutral fill rather than borrowing
+    /// some other item's colour.
     /// </summary>
     private Brush FillOf(Operation op) =>
-        EffectiveColorBy == ChartColorBy.Region && !op.HasRegion
-            ? NoRegionBrush
-            : Allocator.GetBrush(ColorKeyOf(op));
+        EffectiveColorBy == ChartColorBy.Robot
+            ? op.HasRobot ? RobotColors.GetBrush(op.RobotName) : UnassignedBrush
+            : Document?.RegionOf(op) is { } region ? RegionColors.GetBrush(region.ColorKey) : UnassignedBrush;
 
     private string LabelOf(Operation op)
     {
@@ -561,8 +570,8 @@ public partial class ChartView : UserControl
             return op.Name;
 
         var other = EffectiveColorBy == ChartColorBy.Robot
-            ? Document?.RegionOf(op)?.Name ?? "(region)"
-            : op.RobotName;
+            ? Document?.RegionOf(op)?.Name ?? "(no region)"
+            : op.HasRobot ? op.RobotName : "(no robot)";
         return $"{op.Name} - {other}";
     }
 
@@ -1677,6 +1686,7 @@ public partial class ChartView : UserControl
             var dialog = new BarEditDialog(Document, bar) { Owner = Window.GetWindow(this) };
             if (dialog.ShowDialog() == true)
             {
+                bar.Name = dialog.OperationName;
                 Document.EditTiming(bar, dialog.Start, dialog.Duration);
                 RaiseEdited();
             }
@@ -1856,7 +1866,7 @@ public partial class ChartView : UserControl
     {
         var region = Document?.RegionOf(op)?.Name ?? "(none)";
         return $"{op.Name}\n" +
-               $"Robot: {op.RobotName}\n" +
+               $"Robot: {(op.HasRobot ? op.RobotName : "(none)")}\n" +
                $"Region: {region}\n" +
                $"Start {TimeMath.Format(op.Start)}   " +
                $"End {TimeMath.Format(op.End)}   " +
@@ -1965,6 +1975,8 @@ public partial class ChartView : UserControl
 
         switch (row.Kind)
         {
+            // The catch-all rows stand for having no robot and no region; there is nothing there to
+            // rename, and both leave the name empty, which the document refuses anyway.
             case RowKind.Robot:
                 Document.RenameRobot(row.RobotName, name);
                 break;

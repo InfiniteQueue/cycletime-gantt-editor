@@ -9,8 +9,13 @@ public sealed class Operation
 
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Every operation is carried out by a robot; that much is required.</summary>
+    /// <summary>
+    /// The robot carrying the work out, or empty for none. Not every operation has one - a wait or
+    /// a machine's own cycle is work the chart has to show without a robot to hang it on.
+    /// </summary>
     public string RobotName { get; set; } = string.Empty;
+
+    public bool HasRobot => !string.IsNullOrWhiteSpace(RobotName);
 
     /// <summary>
     /// The region the work happens in, or <see cref="Guid.Empty"/> for none. Not every operation

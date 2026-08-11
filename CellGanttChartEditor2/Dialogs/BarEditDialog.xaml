@@ -34,8 +34,10 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <!-- The name is editable here: double-clicking a bar is the gesture for renaming an
+                 operation, the same way double-clicking a row header renames a row. -->
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Operation"/>
-            <TextBlock Grid.Row="0" Grid.Column="1" x:Name="OperationText" FontWeight="Bold"/>
+            <TextBox   Grid.Row="0" Grid.Column="1" x:Name="OperationBox" FontWeight="Bold"/>
 
             <TextBlock Grid.Row="1" Grid.Column="0" Text="Robot"/>
             <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RobotText"/>

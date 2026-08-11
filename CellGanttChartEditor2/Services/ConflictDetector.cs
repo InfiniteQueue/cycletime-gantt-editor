@@ -24,7 +24,8 @@ public static class ConflictDetector
             var b = ops[j];
 
             var kind = ConflictKind.None;
-            if (string.Equals(a.RobotName, b.RobotName, StringComparison.OrdinalIgnoreCase))
+            // Two operations with no robot at all are not thereby the same robot double-booked.
+            if (a.HasRobot && string.Equals(a.RobotName, b.RobotName, StringComparison.OrdinalIgnoreCase))
                 kind |= ConflictKind.Robot;
             // Two operations with no region at all are not thereby in the same place.
             if (a.HasRegion && a.RegionId == b.RegionId)
