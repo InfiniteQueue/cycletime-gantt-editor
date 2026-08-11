@@ -37,6 +37,12 @@ public static class Palette
     public static readonly Color GroupEdge = Rgb(0x4A, 0x51, 0x60);
     public static readonly Color GroupBlock = Rgb(0x8A, 0x92, 0xA3);
 
+    /// <summary>
+    /// A robot's crosshair on the image while nothing is colouring robots. Deliberately the same
+    /// neutral as the collapsed group block: it marks a thing the chart is not currently keying on.
+    /// </summary>
+    public static readonly Color Crosshair = Rgb(0xC2, 0xC8, 0xD4);
+
     /// <summary>Where a dragged row would land.</summary>
     public static readonly Color DropIndicator = Rgb(0x3D, 0xDC, 0x84);
 

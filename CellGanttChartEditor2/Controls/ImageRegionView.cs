@@ -35,10 +35,26 @@ public sealed class ImageRegionView : FrameworkElement
     private const double HighlightExtraThickness = 3;
     private const double ClickSlop = 5;
 
+    /// <summary>
+    /// A robot crosshair's reach at 1:1 zoom, and the limits it is held between. It tracks the zoom
+    /// so it keeps its size relative to the image, and the limits are wide - they are there to stop
+    /// the mark vanishing or swallowing the view at the ends of the zoom range, not to pin it at
+    /// ordinary ones.
+    /// </summary>
+    private const double CrosshairReach = 14;
+    private const double MinCrosshairReach = 7;
+    private const double MaxCrosshairReach = 110;
+
+    /// <summary>Stroke weight for the crosshair, likewise scaled and bounded.</summary>
+    private const double MinCrosshairPen = 1.5;
+    private const double MaxCrosshairPen = 9;
+
     private static readonly Brush Background = Palette.Brush(Palette.ImageSurface);
     private static readonly Brush LabelPlateBrush = Palette.Brush(Palette.LabelPlate);
     private static readonly Brush BannerBrush = Palette.Brush(Color.FromArgb(0xEE, 0x1F, 0x6F, 0xEB));
     private static readonly Brush HintBrush = Palette.Brush(Palette.Muted);
+    private static readonly Brush CrosshairBrush = Palette.Brush(Palette.Crosshair);
+    private static readonly Brush KeylineBrush = Palette.Brush(Color.FromArgb(0xB0, 0x10, 0x12, 0x16));
     private static readonly Brush RubberBandFill = Palette.Brush(Color.FromArgb(48, 0xFF, 0xFF, 0xFF));
     private static readonly Pen RubberBandPen = MakeRubberBandPen();
     private static readonly Typeface Face = new("Segoe UI");
@@ -52,6 +68,8 @@ public sealed class ImageRegionView : FrameworkElement
 
     // Pick state
     private TaskCompletionSource<RegionPickResult?>? _pick;
+    private TaskCompletionSource<Point?>? _pointPick;
+    private string _pointPickHint = string.Empty;
     private bool _allowExisting;
     private bool _dragging;
     private Point _dragStart;
@@ -64,8 +82,10 @@ public sealed class ImageRegionView : FrameworkElement
 
     private readonly List<(Rect Screen, ChartRegion Region)> _boxHits = new();
     private readonly List<(Rect Screen, ChartRegion Region)> _labelHits = new();
+    private readonly List<(Rect Screen, RobotInfo Robot)> _robotHits = new();
     private readonly HashSet<Guid> _highlighted = new();
     private ChartRegion? _hover;
+    private RobotInfo? _hoverRobot;
 
     private static Pen MakeRubberBandPen()
     {
@@ -90,6 +110,18 @@ public sealed class ImageRegionView : FrameworkElement
     /// <summary>Supplies the allocated colour a region's border is painted with.</summary>
     public Func<ChartRegion, Brush>? BrushProvider { get; set; }
 
+    /// <summary>Robots that have been given a place on the image. Drawn as crosshairs.</summary>
+    public IReadOnlyList<RobotInfo> RobotMarkers { get; set; } = Array.Empty<RobotInfo>();
+
+    /// <summary>
+    /// Supplies a crosshair's colour. Returning null takes the neutral one, which is what happens
+    /// whenever the chart is not colour coding by robot and the colour would mean nothing.
+    /// </summary>
+    public Func<RobotInfo, Brush?>? RobotBrushProvider { get; set; }
+
+    /// <summary>The robot whose crosshair is under the pointer, or null on the way out of one.</summary>
+    public event EventHandler<RobotInfo?>? RobotHovered;
+
     /// <summary>
     /// Regions whose borders are currently emphasised, driven by chart hover. Hovering a bar
     /// names one; hovering a row header names every region that row's operations touch.
@@ -97,6 +129,11 @@ public sealed class ImageRegionView : FrameworkElement
     public IReadOnlyCollection<Guid> HighlightedRegionIds => _highlighted;
 
     public bool IsPicking => _pick != null;
+
+    public bool IsPickingPoint => _pointPick != null;
+
+    /// <summary>True while either kind of pick is running, which is what suppresses panning.</summary>
+    public bool IsPickingAnything => IsPicking || IsPickingPoint;
 
     public event EventHandler<ChartRegion>? RegionRenameRequested;
 
@@ -177,14 +214,44 @@ public sealed class ImageRegionView : FrameworkElement
         return _pick.Task;
     }
 
-    public void CancelPick() => CompletePick(null);
+    /// <summary>
+    /// Asks the user to click a single spot on the image, for placing something rather than sizing
+    /// it. <paramref name="what"/> names the thing being placed, for the banner. Resolves to null if
+    /// the pick is cancelled, and to a point in image pixels otherwise.
+    /// </summary>
+    public Task<Point?> PickPointAsync(string what)
+    {
+        CancelPick();
+        _pointPickHint = $"Click the spot on the image for {what}. Esc to cancel.";
+        _pointPick = new TaskCompletionSource<Point?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Cursor = Cursors.Cross;
+        Focus();
+        InvalidateVisual();
+        return _pointPick.Task;
+    }
+
+    /// <summary>Cancels whichever pick is running, if any.</summary>
+    public void CancelPick()
+    {
+        CompletePick(null);
+        CompletePointPick(null);
+    }
 
     private void CompletePick(RegionPickResult? result)
     {
         var pick = _pick;
         _pick = null;
         _dragging = false;
-        Cursor = Cursors.Arrow;
+        Cursor = IsPickingPoint ? Cursors.Cross : Cursors.Arrow;
+        InvalidateVisual();
+        pick?.TrySetResult(result);
+    }
+
+    private void CompletePointPick(Point? result)
+    {
+        var pick = _pointPick;
+        _pointPick = null;
+        Cursor = IsPicking ? Cursors.Cross : Cursors.Arrow;
         InvalidateVisual();
         pick?.TrySetResult(result);
     }
@@ -208,6 +275,7 @@ public sealed class ImageRegionView : FrameworkElement
 
         _boxHits.Clear();
         _labelHits.Clear();
+        _robotHits.Clear();
 
         if (_image == null)
         {
@@ -220,13 +288,81 @@ public sealed class ImageRegionView : FrameworkElement
         foreach (var region in Regions)
             DrawRegion(dc, region);
 
+        // Crosshairs go over the region borders: they mark a single spot, so being covered by a box
+        // drawn around them would lose them.
+        foreach (var robot in RobotMarkers)
+            DrawCrosshair(dc, robot);
+
         if (_dragging)
             dc.DrawRectangle(RubberBandFill, RubberBandPen, new Rect(_dragStart, _dragCurrent));
 
-        if (IsPicking)
+        if (IsPickingPoint)
+            DrawHint(dc, size, _pointPickHint);
+        else if (IsPicking)
             DrawHint(dc, size, _allowExisting
                 ? "Drag a box on the image to define a new region, or click an existing one. Esc to cancel."
                 : "Drag a box on the image to redefine this region. Esc to cancel.");
+    }
+
+    /// <summary>
+    /// A robot's place on the image: a ring with four arms, in the robot's own colour when the chart
+    /// is colour coding by robot and a neutral grey when it is not. Hovering names it.
+    /// </summary>
+    private void DrawCrosshair(DrawingContext dc, RobotInfo robot)
+    {
+        if (robot.Location is not { } location)
+            return;
+
+        var centre = ToScreen(location);
+        var reach = Math.Clamp(CrosshairReach * _scale, MinCrosshairReach, MaxCrosshairReach);
+        var thickness = Math.Clamp(BaseBorderThickness * _scale, MinCrosshairPen, MaxCrosshairPen);
+        var hovered = ReferenceEquals(_hoverRobot, robot);
+
+        _robotHits.Add((new Rect(centre.X - reach, centre.Y - reach, reach * 2, reach * 2), robot));
+
+        var stroke = RobotBrushProvider?.Invoke(robot) ?? CrosshairBrush;
+        if (hovered)
+            thickness *= 1.7;
+
+        var ring = reach * 0.45;
+
+        // A dark keyline under the mark, so it holds up over a light photograph as well as a dark
+        // one. A halo is not used here: the crosshair is small enough that one would swallow it.
+        var keyline = new Pen(KeylineBrush, thickness + 2);
+        dc.DrawEllipse(null, keyline, centre, ring, ring);
+        DrawArms(dc, keyline, centre, ring, reach);
+
+        var pen = new Pen(stroke, thickness);
+        dc.DrawEllipse(null, pen, centre, ring, ring);
+        DrawArms(dc, pen, centre, ring, reach);
+
+        if (hovered)
+            DrawRobotLabel(dc, robot, centre, reach);
+    }
+
+    /// <summary>The four spokes, stopping short of the ring so the centre stays clear.</summary>
+    private static void DrawArms(DrawingContext dc, Pen pen, Point centre, double ring, double reach)
+    {
+        var gap = ring * 1.35;
+        dc.DrawLine(pen, new Point(centre.X - reach, centre.Y), new Point(centre.X - gap, centre.Y));
+        dc.DrawLine(pen, new Point(centre.X + gap, centre.Y), new Point(centre.X + reach, centre.Y));
+        dc.DrawLine(pen, new Point(centre.X, centre.Y - reach), new Point(centre.X, centre.Y - gap));
+        dc.DrawLine(pen, new Point(centre.X, centre.Y + gap), new Point(centre.X, centre.Y + reach));
+    }
+
+    /// <summary>The robot's name on the same dark plate the region titles use, under the crosshair.</summary>
+    private void DrawRobotLabel(DrawingContext dc, RobotInfo robot, Point centre, double reach)
+    {
+        var stroke = RobotBrushProvider?.Invoke(robot) ?? CrosshairBrush;
+        var text = Text(robot.Name, LabelFontSize, Brushes.White, BoldFace);
+        var w = text.Width + (LabelPaddingX + LabelBorderThickness) * 2;
+        var h = text.Height + (LabelPaddingY + LabelBorderThickness) * 2;
+
+        var rect = new Rect(centre.X - w / 2, centre.Y + reach + 4, w, h);
+        dc.DrawRoundedRectangle(LabelPlateBrush, new Pen(stroke, LabelBorderThickness), rect,
+            LabelCornerRadius, LabelCornerRadius);
+        dc.DrawText(text, new Point(rect.Left + LabelPaddingX + LabelBorderThickness,
+            rect.Top + LabelPaddingY + LabelBorderThickness));
     }
 
     /// <summary>
@@ -337,8 +473,16 @@ public sealed class ImageRegionView : FrameworkElement
         base.OnMouseDown(e);
         Focus();
 
+        // A point pick is a single click, so it is settled before anything else looks at the button.
+        if (e.ChangedButton == MouseButton.Left && IsPickingPoint)
+        {
+            CompletePointPick(ClampToImage(ToImage(e.GetPosition(this))));
+            e.Handled = true;
+            return;
+        }
+
         // Renaming is driven from the title drawn on the border.
-        if (e.ChangedButton == MouseButton.Left && e.ClickCount == 2 && !IsPicking &&
+        if (e.ChangedButton == MouseButton.Left && e.ClickCount == 2 && !IsPickingAnything &&
             TryStartRename(e.GetPosition(this)))
         {
             e.Handled = true;
@@ -346,7 +490,7 @@ public sealed class ImageRegionView : FrameworkElement
         }
 
         if (e.ChangedButton == MouseButton.Middle ||
-            (e.ChangedButton == MouseButton.Left && !IsPicking))
+            (e.ChangedButton == MouseButton.Left && !IsPickingAnything))
         {
             _panning = true;
             _panStart = e.GetPosition(this);
@@ -368,7 +512,7 @@ public sealed class ImageRegionView : FrameworkElement
 
     protected override void OnMouseRightButtonDown(MouseButtonEventArgs e)
     {
-        if (IsPicking)
+        if (IsPickingAnything)
         {
             CancelPick();
             e.Handled = true;
@@ -402,6 +546,37 @@ public sealed class ImageRegionView : FrameworkElement
                 InvalidateVisual();
             }
         }
+
+        UpdateRobotHover(point);
+    }
+
+    /// <summary>
+    /// Tracks which crosshair the pointer is over. Runs whatever else is going on, since a robot's
+    /// regions are worth seeing while placing another one.
+    /// </summary>
+    private void UpdateRobotHover(Point point)
+    {
+        RobotInfo? hit = null;
+        var best = double.MaxValue;
+        foreach (var (screen, robot) in _robotHits)
+        {
+            if (!screen.Contains(point))
+                continue;
+            // Overlapping crosshairs: the one whose centre is nearest wins.
+            var distance = (point - new Point(screen.Left + screen.Width / 2,
+                screen.Top + screen.Height / 2)).Length;
+            if (distance >= best)
+                continue;
+            best = distance;
+            hit = robot;
+        }
+
+        if (ReferenceEquals(hit, _hoverRobot))
+            return;
+
+        _hoverRobot = hit;
+        RobotHovered?.Invoke(this, hit);
+        InvalidateVisual();
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
@@ -411,7 +586,7 @@ public sealed class ImageRegionView : FrameworkElement
         if (_panning)
         {
             _panning = false;
-            Cursor = IsPicking ? Cursors.Cross : Cursors.Arrow;
+            Cursor = IsPickingAnything ? Cursors.Cross : Cursors.Arrow;
             ReleaseMouseCapture();
             return;
         }
@@ -462,7 +637,7 @@ public sealed class ImageRegionView : FrameworkElement
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && IsPicking)
+        if (e.Key == Key.Escape && IsPickingAnything)
         {
             CancelPick();
             e.Handled = true;
@@ -474,6 +649,14 @@ public sealed class ImageRegionView : FrameworkElement
     protected override void OnMouseLeave(MouseEventArgs e)
     {
         base.OnMouseLeave(e);
+
+        if (_hoverRobot != null)
+        {
+            _hoverRobot = null;
+            RobotHovered?.Invoke(this, null);
+            InvalidateVisual();
+        }
+
         if (_hover != null)
         {
             _hover = null;
@@ -510,6 +693,11 @@ public sealed class ImageRegionView : FrameworkElement
         }
         return best;
     }
+
+    private Point ClampToImage(Point point) => _image == null
+        ? point
+        : new Point(Math.Clamp(point.X, 0, _image.PixelWidth),
+            Math.Clamp(point.Y, 0, _image.PixelHeight));
 
     private Rect ClampToImage(Rect rect)
     {

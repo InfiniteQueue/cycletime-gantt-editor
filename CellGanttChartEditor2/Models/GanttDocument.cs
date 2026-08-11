@@ -29,6 +29,14 @@ public sealed class GanttDocument
 
     public RowLayout OperationRows { get; init; } = new();
 
+    /// <summary>
+    /// Detail for robots that have any - a place on the image, or simply having been added by hand
+    /// before there was any work for them. An entry here is also what keeps a robot alive with no
+    /// operations left: one that only ever existed because an operation named it goes when that
+    /// operation does, while one the user set up stays until it is deleted.
+    /// </summary>
+    public List<RobotInfo> RobotDetails { get; } = new();
+
     public RowLayout LayoutFor(ChartGroupMode mode) => mode switch
     {
         ChartGroupMode.Region => RobotRows,
@@ -60,7 +68,10 @@ public sealed class GanttDocument
 
     public ChartRegion? RegionOf(Operation op) => FindRegion(op.RegionId);
 
-    /// <summary>Distinct robot names in first-use order.</summary>
+    /// <summary>
+    /// Every robot the document knows: those an operation names, in first-use order, followed by any
+    /// registered without work yet - one added through the items panel and not used since.
+    /// </summary>
     public List<string> Robots()
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -68,7 +79,42 @@ public sealed class GanttDocument
         foreach (var op in Operations)
             if (seen.Add(op.RobotName))
                 list.Add(op.RobotName);
+        foreach (var robot in RobotDetails)
+            if (seen.Add(robot.Name))
+                list.Add(robot.Name);
         return list;
+    }
+
+    public RobotInfo? FindRobot(string name) =>
+        RobotDetails.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The detail record for a robot, created on first use so callers can just edit it.</summary>
+    public RobotInfo RobotDetail(string name)
+    {
+        var found = FindRobot(name);
+        if (found != null)
+            return found;
+
+        var info = new RobotInfo { Name = name };
+        RobotDetails.Add(info);
+        return info;
+    }
+
+    /// <summary>Robots placed on the image, in first-use order. What the crosshairs are drawn from.</summary>
+    public List<RobotInfo> PlacedRobots() => Robots()
+        .Select(FindRobot)
+        .Where(r => r is { Location: not null })
+        .Select(r => r!)
+        .ToList();
+
+    /// <summary>Regions a robot's operations are involved with, in definition order.</summary>
+    public List<Guid> RegionsOfRobot(string name)
+    {
+        var ids = Operations
+            .Where(o => string.Equals(o.RobotName, name, StringComparison.OrdinalIgnoreCase))
+            .Select(o => o.RegionId)
+            .ToHashSet();
+        return Regions.Where(r => ids.Contains(r.Id)).Select(r => r.Id).ToList();
     }
 
     /// <summary>Regions that still carry at least one operation, in definition order.</summary>
@@ -129,13 +175,51 @@ public sealed class GanttDocument
 
     public void RemoveLink(OperationLink link) => Links.Remove(link);
 
-    /// <summary>Drops regions that no longer have any operation. Robots vanish automatically.</summary>
-    public void PruneOrphans()
+    /// <summary>
+    /// Deletes a region and everything defined against it. Regions and robots are the user's to add
+    /// and remove, so nothing here happens on its own - an emptied region stays until it is deleted.
+    /// </summary>
+    public void RemoveRegion(ChartRegion region)
     {
-        var used = Operations.Select(o => o.RegionId).ToHashSet();
-        Regions.RemoveAll(r => !used.Contains(r.Id));
-        PruneLayouts();
+        foreach (var op in Operations.Where(o => o.RegionId == region.Id).ToList())
+        {
+            Operations.Remove(op);
+            Links.RemoveAll(l => l.SourceId == op.Id || l.TargetId == op.Id);
+        }
+
+        Regions.Remove(region);
+        PruneOrphans();
     }
+
+    /// <summary>Deletes a robot, and with it every operation it was carrying out.</summary>
+    public void RemoveRobot(string name)
+    {
+        foreach (var op in Operations
+                     .Where(o => string.Equals(o.RobotName, name, StringComparison.OrdinalIgnoreCase))
+                     .ToList())
+        {
+            Operations.Remove(op);
+            Links.RemoveAll(l => l.SourceId == op.Id || l.TargetId == op.Id);
+        }
+
+        RobotDetails.RemoveAll(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+        PruneOrphans();
+    }
+
+    /// <summary>A name no region or robot is using yet, as "{prefix} {n}".</summary>
+    public string UnusedName(string prefix, IEnumerable<string> taken)
+    {
+        var used = new HashSet<string>(taken, StringComparer.OrdinalIgnoreCase);
+        for (var i = 1; ; i++)
+        {
+            var name = $"{prefix} {i}";
+            if (!used.Contains(name))
+                return name;
+        }
+    }
+
+    /// <summary>Tidies the row layouts. Regions and robots themselves are never dropped here.</summary>
+    public void PruneOrphans() => PruneLayouts();
 
     /// <summary>Clears row order and group entries that no longer name a live row.</summary>
     public void PruneLayouts()
@@ -268,5 +352,28 @@ public sealed class GanttDocument
 
         // The robot's name is its row key, so the layout has to follow it.
         RobotRows.Rekey(oldName, newName);
+        RekeyRobotDetail(oldName, newName);
+    }
+
+    /// <summary>
+    /// Carries a robot's detail across a rename. Renaming onto a name already in use merges the two,
+    /// and the place already set for the surviving name wins - it is the one still on screen.
+    /// </summary>
+    private void RekeyRobotDetail(string oldName, string newName)
+    {
+        var moving = FindRobot(oldName);
+        if (moving == null)
+            return;
+
+        RobotDetails.Remove(moving);
+        var existing = FindRobot(newName);
+        if (existing == null)
+        {
+            moving.Name = newName;
+            RobotDetails.Add(moving);
+            return;
+        }
+
+        existing.Location ??= moving.Location;
     }
 }

@@ -60,7 +60,14 @@
         <!-- Toolbar -->
         <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
-            <WrapPanel Margin="8,6" Orientation="Horizontal">
+            <!-- A DockPanel rather than the WrapPanel alone, so the items toggle can sit hard against
+                 the right edge while the rest of the toolbar still wraps. -->
+            <DockPanel Margin="8,6">
+            <ToggleButton DockPanel.Dock="Right" x:Name="ItemsToggle" Style="{StaticResource ToolToggle}"
+                          Content="Show all items" Margin="8,0,0,0" VerticalAlignment="Center"
+                          ToolTip="List every region and robot, with their properties."
+                          Checked="ItemsToggle_Changed" Unchecked="ItemsToggle_Changed"/>
+            <WrapPanel Orientation="Horizontal">
                 <Button Style="{StaticResource ToolButton}" Content="New" Click="New_Click"/>
                 <Button Style="{StaticResource ToolButton}" Content="Open..." Click="Open_Click"/>
                 <Button Style="{StaticResource ToolButton}" Content="Save" Click="Save_Click"/>
@@ -86,6 +93,7 @@
 
                 <Separator Margin="7,2" Width="1" Height="22"/>
             </WrapPanel>
+            </DockPanel>
         </Border>
 
         <!-- Status bar -->
@@ -105,6 +113,14 @@
                               Content="Highlight conflicts" IsChecked="True"
                               Checked="OverlapToggle_Changed" Unchecked="OverlapToggle_Changed"/>
         </StatusBar>
+
+        <!-- The items panel, collapsed until the toolbar toggle asks for it. Docked before the main
+             grid so it takes its width off the right rather than overlaying anything. -->
+        <Border x:Name="ItemsPanel" DockPanel.Dock="Right" Width="320" Visibility="Collapsed"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
+            <ctl:ItemListView x:Name="Items"/>
+        </Border>
 
         <Grid>
             <Grid.RowDefinitions>

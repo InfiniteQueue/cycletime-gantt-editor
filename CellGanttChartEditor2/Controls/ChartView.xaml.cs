@@ -97,6 +97,7 @@ public partial class ChartView : UserControl
     private readonly List<(Point[] Points, OperationLink Link)> _linkHits = new();
     private readonly List<(Rect Rect, Line Line)> _headerHits = new();
     private readonly List<(Rect Rect, RowGroup Group)> _chevronHits = new();
+    private readonly HashSet<Guid> _highlightedRegions = new();
     private readonly ToolTip _tip = new()
     {
         Placement = PlacementMode.Relative,
@@ -196,12 +197,30 @@ public partial class ChartView : UserControl
     /// </summary>
     public event EventHandler<IReadOnlyCollection<Guid>>? HoveredRegionChanged;
 
+    /// <summary>
+    /// Regions to emphasise, driven from outside the chart - hovering a robot's crosshair on the
+    /// image names every region that robot works in. Bars in them gain the halo a selected bar has,
+    /// without the solid outline, so the two stay tellable apart.
+    /// </summary>
+    public void SetHighlightedRegions(IReadOnlyCollection<Guid>? regionIds)
+    {
+        var next = regionIds ?? Array.Empty<Guid>();
+        if (_highlightedRegions.Count == next.Count && next.All(_highlightedRegions.Contains))
+            return;
+
+        _highlightedRegions.Clear();
+        foreach (var id in next)
+            _highlightedRegions.Add(id);
+        Surface.InvalidateVisual();
+    }
+
     public void SetDocument(GanttDocument? document)
     {
         Document = document;
         _selectedOperation = null;
         _selectedLink = null;
         RegionFilter.Clear();
+        _highlightedRegions.Clear();
         _zoom = 1;
         _scrollX = 0;
         _scrollY = 0;
@@ -874,6 +893,7 @@ public partial class ChartView : UserControl
         var bands = TimeMath.Bands(op.Start, op.Duration, cycle);
         var selected = ReferenceEquals(op, _selectedOperation);
         var isDropTarget = ReferenceEquals(op, _dropTarget);
+        var highlighted = _highlightedRegions.Contains(op.RegionId);
 
         if (ghosted)
             dc.PushOpacity(Palette.DimmedOpacity);
@@ -886,8 +906,9 @@ public partial class ChartView : UserControl
             _barHits.Add((rect, op));
             last = rect;
 
-            // A selected bar sits inside a white halo, standing in for the old drop shadow.
-            if (selected)
+            // A selected bar sits inside a white halo, standing in for the old drop shadow. A bar
+            // highlighted from outside takes the same halo without the outline that follows it.
+            if (selected || highlighted)
                 foreach (var glow in SelectionGlowPens)
                     dc.DrawRoundedRectangle(null, glow, rect, BarCornerRadius, BarCornerRadius);
 

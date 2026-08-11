@@ -41,6 +41,23 @@ public partial class MainWindow : Window
         ImageView.BrushProvider = region => _regionColors.GetStrokeBrush(region.ColorKey);
         ImageView.RegionRenameRequested += ImageView_RegionRenameRequested;
 
+        // A crosshair only takes the robot's colour while the chart is keyed on robots; otherwise
+        // the colour would be one the chart is not currently showing, so it stays neutral.
+        ImageView.RobotBrushProvider = robot => Chart.EffectiveColorBy == ChartColorBy.Robot
+            ? _robotColors.GetStrokeBrush(robot.Name)
+            : null;
+        ImageView.RobotHovered += ImageView_RobotHovered;
+
+        Items.RegionColors = _regionColors;
+        Items.RobotColors = _robotColors;
+        Items.Edited += (_, _) => RefreshAll();
+        Items.RedrawRegionRequested += Items_RedrawRegionRequested;
+        Items.PlaceRobotRequested += Items_PlaceRobotRequested;
+        Items.AddRegionRequested += Items_AddRegionRequested;
+        Items.AddRobotRequested += Items_AddRobotRequested;
+        Items.DeleteRegionRequested += Items_DeleteRegionRequested;
+        Items.DeleteRobotRequested += Items_DeleteRobotRequested;
+
         GroupByBox.ItemsSource = ViewOptions.GroupModes;
         GroupByBox.SelectedIndex = 0;
         ColorByBox.ItemsSource = ViewOptions.ColorModes;
@@ -73,12 +90,16 @@ public partial class MainWindow : Window
         _regionColors.Sync(_document.Regions.Select(r => r.ColorKey));
         _robotColors.Sync(_document.Robots());
 
-        // A region can disappear when its last operation is deleted.
+        // A region only goes when it is deleted outright, which takes its operations with it.
         var live = _document.Regions.Select(r => r.Id).ToHashSet();
         Chart.RegionFilter.RemoveWhere(id => !live.Contains(id));
 
         ImageView.Regions = _document.Regions;
+        ImageView.RobotMarkers = _document.PlacedRobots();
         ImageView.InvalidateVisual();
+
+        Items.Document = _document;
+        Items.Rebuild();
 
         RebuildFilterChips();
         Chart.Refresh();
@@ -250,14 +271,140 @@ public partial class MainWindow : Window
         ColorByLabel.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
         ColorByBox.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
         SortByTimeButton.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
+
+        // Grouping decides the colour source, which the crosshairs follow.
+        ImageView.InvalidateVisual();
     }
 
     private void SortByTime_Click(object sender, RoutedEventArgs e) => Chart.SortChronologically();
 
     private void ColorBy_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (Chart != null && ColorByBox.SelectedItem is NamedOption<ChartColorBy> option)
-            Chart.SetColorMode(option.Value);
+        if (Chart == null || ColorByBox.SelectedItem is not NamedOption<ChartColorBy> option)
+            return;
+
+        Chart.SetColorMode(option.Value);
+        // The crosshairs follow the chart's colour source, so they have to be redrawn with it.
+        ImageView.InvalidateVisual();
+    }
+
+    private void ItemsToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (ItemsPanel == null)
+            return;
+
+        ItemsPanel.Visibility = ItemsToggle.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    // ---------------------------------------------------------- items panel
+
+    private async void Items_RedrawRegionRequested(object? sender, ChartRegion region)
+    {
+        var pick = await ImageView.PickRegionAsync(allowExisting: false);
+        if (pick is not { IsNew: true })
+            return;
+
+        region.Bounds = pick.NewBounds;
+        RefreshAll();
+    }
+
+    private async void Items_PlaceRobotRequested(object? sender, string robot)
+    {
+        if (!RequireImage("a robot is placed against a point on it", "Place robot"))
+            return;
+
+        var point = await ImageView.PickPointAsync($"\"{robot}\"");
+        if (point == null)
+            return;
+
+        // Placing a robot is also what registers it, so the detail record is made here rather than
+        // when the panel merely lists it.
+        _document.RobotDetail(robot).Location = point;
+        RefreshAll();
+    }
+
+    private async void Items_AddRegionRequested(object? sender, EventArgs e)
+    {
+        if (!RequireImage("a region is a box drawn on it", "Add region"))
+            return;
+
+        var pick = await ImageView.PickRegionAsync(allowExisting: false);
+        if (pick is not { IsNew: true })
+            return;
+
+        var region = _document.AddRegion(
+            _document.UnusedName("Region", _document.Regions.Select(r => r.Name)),
+            pick.NewBounds, RegionCategory.Uncategorised);
+
+        // Open its editor, so the placeholder name is sitting there ready to be replaced.
+        Items.ExpandRegion(region);
+        RefreshAll();
+    }
+
+    private void Items_AddRobotRequested(object? sender, EventArgs e)
+    {
+        var name = _document.UnusedName("Robot", _document.Robots());
+        _document.RobotDetail(name);
+        Items.ExpandRobot(name);
+        RefreshAll();
+    }
+
+    private void Items_DeleteRegionRequested(object? sender, ChartRegion region)
+    {
+        var used = _document.Operations.Count(o => o.RegionId == region.Id);
+        if (!ConfirmDelete($"region \"{region.Name}\"", used, "defined against it"))
+            return;
+
+        _document.RemoveRegion(region);
+        RefreshAll();
+    }
+
+    private void Items_DeleteRobotRequested(object? sender, string robot)
+    {
+        var used = _document.Operations.Count(o =>
+            string.Equals(o.RobotName, robot, StringComparison.OrdinalIgnoreCase));
+        if (!ConfirmDelete($"robot \"{robot}\"", used, "it carries out"))
+            return;
+
+        _document.RemoveRobot(robot);
+        RefreshAll();
+    }
+
+    /// <summary>Deleting takes operations with it, so the count is spelled out before it happens.</summary>
+    private bool ConfirmDelete(string what, int operations, string relation)
+    {
+        var message = operations == 0
+            ? $"Delete the {what}?"
+            : $"Delete the {what}, and the {operations} operation{(operations == 1 ? "" : "s")} {relation}?";
+
+        return MessageBox.Show(this, message, "Delete", MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning) == MessageBoxResult.OK;
+    }
+
+    private bool RequireImage(string because, string title)
+    {
+        if (_document.ImageData != null)
+            return true;
+
+        MessageBox.Show(this, $"Load the reference image first - {because}.", title,
+            MessageBoxButton.OK, MessageBoxImage.Information);
+        return false;
+    }
+
+    /// <summary>
+    /// Hovering a robot's crosshair lights up every region that robot works in - the bars in the
+    /// chart, and the same regions' borders on the image the pointer is already over.
+    /// </summary>
+    private void ImageView_RobotHovered(object? sender, RobotInfo? robot)
+    {
+        var regions = robot == null
+            ? Array.Empty<Guid>()
+            : _document.RegionsOfRobot(robot.Name).ToArray();
+
+        Chart.SetHighlightedRegions(regions);
+        ImageView.SetHighlightedRegions(regions);
     }
 
     // --------------------------------------------------------------- filter
@@ -320,12 +467,8 @@ public partial class MainWindow : Window
 
     private async void AddOperation_Click(object sender, RoutedEventArgs e)
     {
-        if (_document.ImageData == null)
-        {
-            MessageBox.Show(this, "Load the reference image first - operations are defined against a region of it.",
-                "Add operation", MessageBoxButton.OK, MessageBoxImage.Information);
+        if (!RequireImage("operations are defined against a region of it", "Add operation"))
             return;
-        }
 
         AddOperationButton.IsEnabled = false;
         try
@@ -381,7 +524,7 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && ImageView.IsPicking)
+        if (e.Key == Key.Escape && ImageView.IsPickingAnything)
         {
             ImageView.CancelPick();
             e.Handled = true;

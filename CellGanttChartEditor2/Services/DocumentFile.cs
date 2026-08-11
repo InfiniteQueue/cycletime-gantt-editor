@@ -15,8 +15,11 @@ public static class DocumentFile
     public const string Extension = ".cgc";
     public const string Filter = "Cell Gantt chart (*.cgc)|*.cgc|All files (*.*)|*.*";
 
-    /// <summary>2 added the per-mode row layouts. Version 1 files still load; they simply have none.</summary>
-    private const int CurrentVersion = 2;
+    /// <summary>
+    /// 2 added the per-mode row layouts, 3 the robot detail. Older files still load; they simply
+    /// have none of what the later versions added.
+    /// </summary>
+    private const int CurrentVersion = 3;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -57,6 +60,12 @@ public static class DocumentFile
                 SourceId = l.SourceId,
                 TargetId = l.TargetId,
                 Lag = l.Lag,
+            }).ToList(),
+            Robots = document.RobotDetails.Select(r => new RobotDto
+            {
+                Name = r.Name,
+                X = r.Location?.X,
+                Y = r.Location?.Y,
             }).ToList(),
             RobotRows = ToDto(document.RobotRows),
             RegionRows = ToDto(document.RegionRows),
@@ -104,6 +113,17 @@ public static class DocumentFile
                 RegionId = o.RegionId,
                 Start = o.Start,
                 Duration = Math.Max(0, o.Duration),
+            });
+        }
+
+        foreach (var r in dto.Robots)
+        {
+            if (string.IsNullOrWhiteSpace(r.Name))
+                continue;
+            document.RobotDetails.Add(new RobotInfo
+            {
+                Name = r.Name,
+                Location = r.X is { } x && r.Y is { } y ? new Point(x, y) : null,
             });
         }
 
@@ -174,9 +194,18 @@ public static class DocumentFile
         public List<RegionDto> Regions { get; set; } = new();
         public List<OperationDto> Operations { get; set; } = new();
         public List<LinkDto> Links { get; set; } = new();
+        public List<RobotDto> Robots { get; set; } = new();
         public RowLayoutDto? RobotRows { get; set; }
         public RowLayoutDto? RegionRows { get; set; }
         public RowLayoutDto? OperationRows { get; set; }
+    }
+
+    /// <summary>Null coordinates mean the robot has not been placed on the image.</summary>
+    private sealed class RobotDto
+    {
+        public string? Name { get; set; }
+        public double? X { get; set; }
+        public double? Y { get; set; }
     }
 
     private sealed class RowLayoutDto
