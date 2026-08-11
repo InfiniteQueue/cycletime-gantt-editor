@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using CellGanttChartEditor2.Models;
 
 namespace CellGanttChartEditor2.Dialogs;
@@ -24,6 +26,8 @@ public partial class OperationDialog : Window
     private const string NoRegionText = "(No region)";
     private const string NewRegionText = "New region...";
 
+    bool userTypedOpName = false;
+
     private readonly GanttDocument _document;
     private bool _loading = true;
 
@@ -37,6 +41,9 @@ public partial class OperationDialog : Window
     {
         InitializeComponent();
 
+        RobotBox.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(RobotOrRegionUpdated));
+        RegionBox.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(RobotOrRegionUpdated));
+
         _document = document;
         Draft = draft;
 
@@ -45,7 +52,7 @@ public partial class OperationDialog : Window
 
         CategoryBox.ItemsSource = RegionCategoryInfo.Options;
         RobotBox.ItemsSource = document.Robots();
-        OperationBox.ItemsSource = document.Operations.Select(o => o.Name).Distinct().ToList();
+        //OperationBox.ItemsSource = document.Operations.Select(o => o.Name).Distinct().ToList();
 
         RegionBox.ItemsSource = Choices();
         RegionBox.SelectedItem = CurrentChoice();
@@ -101,6 +108,11 @@ public partial class OperationDialog : Window
         CategoryLabel.Visibility = creating ? Visibility.Visible : Visibility.Collapsed;
         CategoryBox.Visibility = creating ? Visibility.Visible : Visibility.Collapsed;
 
+        if (!creating)
+        {
+            RegionNameBox.Text = null;
+            CategoryBox.SelectedItem = null;
+        }
         RegionAreaText.Text = creating
             ? Draft.NewRegionBounds.Width > 0 && Draft.NewRegionBounds.Height > 0
                 ? $"Area drawn on the image: {Draft.NewRegionBounds.Width:0} by {Draft.NewRegionBounds.Height:0} pixels."
@@ -110,6 +122,20 @@ public partial class OperationDialog : Window
         RobotPlaceText.Visibility = Draft.RobotLocation == null ? Visibility.Collapsed : Visibility.Visible;
         if (Draft.RobotLocation is { } at)
             RobotPlaceText.Text = $"Will be placed on the image at {at.X:0}, {at.Y:0}.";
+    }
+
+    private void RobotOrRegionUpdated(object sender, RoutedEventArgs e)
+    {
+        if (userTypedOpName) return;
+        UpdateLayout();
+        AutoGenerateOpName(sender, e);
+    }
+
+    private void AutoGenerateOpName(object sender, RoutedEventArgs e)
+    {
+        var selectedRegion = !string.IsNullOrWhiteSpace(RegionNameBox.Text) ? RegionNameBox.Text : RegionBox.SelectedValue.ToString();
+        var regionName = (selectedRegion == NoRegionText || selectedRegion == NewRegionText) ? string.Empty : selectedRegion;
+        OperationBox.Text = string.Join(" ", new string?[] { RobotBox.Text, regionName }.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
     private void Region_Changed(object sender, SelectionChangedEventArgs e)
@@ -123,6 +149,7 @@ public partial class OperationDialog : Window
             RegionNameBox.Text = _document.UnusedName("Region", _document.Regions.Select(r => r.Name));
 
         SyncRegionFields();
+        RobotOrRegionUpdated(sender, e);
     }
 
     // ------------------------------------------------------------------ picks
@@ -216,6 +243,11 @@ public partial class OperationDialog : Window
     {
         ErrorText.Text = message;
         ErrorText.Visibility = Visibility.Visible;
+    }
+
+    private void OperationBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        userTypedOpName = true;
     }
 
     internal static bool TryParse(string text, out double value) =>

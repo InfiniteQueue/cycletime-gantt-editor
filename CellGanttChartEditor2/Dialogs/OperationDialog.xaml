@@ -40,11 +40,10 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Robot"/>
-            <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="RobotBox" IsEditable="True"/>
+            <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="RobotBox" IsEditable="True" Height="29"/>
             <Button    Grid.Row="0" Grid.Column="2" x:Name="RobotPickButton"
                        Style="{StaticResource PickButton}" Click="PickRobot_Click"
                        ToolTip="Click the spot on the image where this robot sits."/>
@@ -53,29 +52,28 @@
                        Foreground="{StaticResource MutedBrush}" FontSize="11"
                        Margin="0,0,0,4" Visibility="Collapsed"/>
 
-            <TextBlock Grid.Row="2" Grid.Column="0" Text="Operation"/>
-            <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="OperationBox" IsEditable="True"/>
-
-            <TextBlock Grid.Row="3" Grid.Column="0" Text="Start time"/>
-            <TextBox   Grid.Row="3" Grid.Column="1" x:Name="StartBox"/>
-
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="Duration"/>
-            <TextBox   Grid.Row="4" Grid.Column="1" x:Name="DurationBox"/>
-
-            <Separator Grid.Row="5" Grid.ColumnSpan="3" Margin="0,10"/>
-
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="Region"/>
-            <ComboBox  Grid.Row="6" Grid.Column="1" x:Name="RegionBox"
-                       SelectionChanged="Region_Changed"/>
-            <Button    Grid.Row="6" Grid.Column="2" x:Name="RegionPickButton"
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Region"/>
+            <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="RegionBox" SelectionChanged="Region_Changed"
+                       Height="29"/>
+            <Button    Grid.Row="2" Grid.Column="2" x:Name="RegionPickButton"
                        Style="{StaticResource PickButton}" Click="PickRegion_Click"
                        ToolTip="Draw a box on the image for a new region, or click one already there."/>
 
-            <TextBlock Grid.Row="7" Grid.Column="0" x:Name="RegionNameLabel" Text="Region name"/>
-            <TextBox   Grid.Row="7" Grid.Column="1" x:Name="RegionNameBox" Padding="3,3,4,3"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" x:Name="RegionNameLabel" Text="Region name"/>
+            <TextBox   Grid.Row="3" Grid.Column="1" x:Name="RegionNameBox" Padding="3,3,4,3" Height="29" TextChanged="RobotOrRegionUpdated"/>
 
-            <TextBlock Grid.Row="8" Grid.Column="0" x:Name="CategoryLabel" Text="Region category"/>
-            <ComboBox  Grid.Row="8" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" x:Name="CategoryLabel" Text="Region category" Margin="0,3,0,10"/>
+            <ComboBox  Grid.Row="4" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text" Margin="0,3,0,10" Height="29"/>
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Operation"/>
+            <TextBox  Grid.Row="5" Grid.Column="1" x:Name="OperationBox" Height="29" PreviewKeyDown="OperationBox_KeyDown"/>
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Start time"/>
+            <TextBox   Grid.Row="6" Grid.Column="1" x:Name="StartBox" Height="29"/>
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Duration"/>
+            <TextBox   Grid.Row="7" Grid.Column="1" x:Name="DurationBox" Height="29"/>
+
         </Grid>
 
         <TextBlock x:Name="RegionAreaText" Foreground="{StaticResource MutedBrush}" FontSize="11"

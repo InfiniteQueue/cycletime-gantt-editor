@@ -93,8 +93,7 @@ public partial class ChartView : UserControl
     private static readonly Pen GroupBlockPen = Palette.Pen(Palette.BarOutline, 1);
     private static readonly Pen DropIndicatorPen = Palette.Pen(Palette.DropIndicator, 3);
     private static readonly Pen DropOntoPen = Palette.Pen(Palette.DropIndicator, 2.5);
-    private static readonly Brush DraggedRowBrush =
-        Palette.Brush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+    private static readonly Brush DraggedRowBrush = Palette.Brush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
 
     /// <summary>Rounded ends on the bars, as in the previous editor.</summary>
     private const double BarCornerRadius = 3;
