@@ -72,7 +72,7 @@
                        ToolTip="Draw a box on the image for a new region, or click one already there."/>
 
             <TextBlock Grid.Row="7" Grid.Column="0" x:Name="RegionNameLabel" Text="Region name"/>
-            <TextBox   Grid.Row="7" Grid.Column="1" x:Name="RegionNameBox"/>
+            <TextBox   Grid.Row="7" Grid.Column="1" x:Name="RegionNameBox" Padding="3,3,4,3"/>
 
             <TextBlock Grid.Row="8" Grid.Column="0" x:Name="CategoryLabel" Text="Region category"/>
             <ComboBox  Grid.Row="8" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text"/>

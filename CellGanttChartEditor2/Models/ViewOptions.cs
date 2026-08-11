@@ -29,8 +29,8 @@ public static class ViewOptions
 {
     public static IReadOnlyList<NamedOption<ChartGroupMode>> GroupModes { get; } = new[]
     {
-        new NamedOption<ChartGroupMode>(ChartGroupMode.Region, "Region"),
-        new NamedOption<ChartGroupMode>(ChartGroupMode.Robot, "Robot"),
+        new NamedOption<ChartGroupMode>(ChartGroupMode.Region, "Robot"), //Todo: fix this stupid hacky reversed display name situation
+        new NamedOption<ChartGroupMode>(ChartGroupMode.Robot, "Region"),
         new NamedOption<ChartGroupMode>(ChartGroupMode.Chronological, "Chronological"),
     };
 

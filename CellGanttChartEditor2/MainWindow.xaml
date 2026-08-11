@@ -144,7 +144,7 @@
                         BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1">
                     <StackPanel Margin="8,6">
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                            <TextBlock Style="{StaticResource ToolLabel}" Text="Group by:" Margin="0,0,5,0"/>
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Sort by:" Margin="0,0,5,0"/>
                             <ComboBox x:Name="GroupByBox" Width="140" DisplayMemberPath="Text"
                                       SelectionChanged="GroupBy_Changed"/>
 

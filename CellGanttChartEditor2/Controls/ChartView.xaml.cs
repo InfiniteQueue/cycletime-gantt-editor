@@ -88,6 +88,7 @@ public partial class ChartView : UserControl
     private static readonly Brush GroupBlockBrush = Palette.Brush(Palette.GroupBlock);
     /// <summary>Fill for a bar the current colour source has no key for - no region, or no robot.</summary>
     private static readonly Brush UnassignedBrush = Palette.Brush(Palette.GroupBlock);
+    private static readonly Brush UnassignedTextBrush = ColorAllocator.TextOn(Palette.GroupBlock);
     private static readonly Pen GroupEdgePen = Palette.Pen(Palette.GroupEdge, 1);
     private static readonly Pen GroupBlockPen = Palette.Pen(Palette.BarOutline, 1);
     private static readonly Pen DropIndicatorPen = Palette.Pen(Palette.DropIndicator, 3);
@@ -951,6 +952,7 @@ public partial class ChartView : UserControl
 
         Rect widest = Rect.Empty;
         Rect last = Rect.Empty;
+        (double From, double To) widestBand = default;
         foreach (var band in bands)
         {
             var rect = BandRect(band, top, lineHeight, x);
@@ -974,11 +976,14 @@ public partial class ChartView : UserControl
                 dc.DrawRoundedRectangle(null, DropTargetPen, rect, BarCornerRadius, BarCornerRadius);
 
             if (widest == Rect.Empty || rect.Width > widest.Width)
+            {
                 widest = rect;
+                widestBand = band;
+            }
         }
 
         if (widest != Rect.Empty && widest.Width > 34)
-            DrawBarLabel(dc, op, widest);
+            DrawBarLabel(dc, op, widest, widestBand, x);
 
         // Resize grip on the trailing edge. The last band always ends at the operation's end,
         // except for a bar at least a cycle long - there the right edge is the loop boundary, not
@@ -998,8 +1003,20 @@ public partial class ChartView : UserControl
     private void DrawOverlaps(DrawingContext dc, Operation op, (double From, double To) band, Rect barRect,
         Func<double, double> x)
     {
+        foreach (var rect in OverlapRects(op, band, barRect, x))
+            dc.DrawRectangle(Brushes.White, OverlapPen, rect);
+    }
+
+    /// <summary>
+    /// Where a bar is painted white by a clash. The label reads these as well as the drawing does,
+    /// so the two cannot disagree about which part of a bar is white.
+    /// </summary>
+    private List<Rect> OverlapRects(Operation op, (double From, double To) band, Rect barRect,
+        Func<double, double> x)
+    {
+        var rects = new List<Rect>();
         if (!Conflicts.OverlapBands.TryGetValue(op.Id, out var overlaps))
-            return;
+            return rects;
 
         foreach (var overlap in overlaps)
         {
@@ -1014,25 +1031,65 @@ public partial class ChartView : UserControl
             if (left + width > barRect.Right)
                 left = Math.Max(barRect.Left, barRect.Right - width);
 
-            var rect = new Rect(left, barRect.Top + 1, width, Math.Max(1, barRect.Height - 2));
-            dc.DrawRectangle(Brushes.White, OverlapPen, rect);
+            rects.Add(new Rect(left, barRect.Top + 1, width, Math.Max(1, barRect.Height - 2)));
         }
+
+        return rects;
     }
 
     /// <summary>
-    /// Bar labels are black: every allocated fill is a bright hue, and the overlap markers are white,
-    /// so one colour stays readable over both.
+    /// A bar's label, in whichever of black and white reads on what is underneath it - the same
+    /// choice the filter chips make about their own fill. A bar is not all one colour, though: a
+    /// clash paints part of it white, and the label crosses that patch in black however dark the
+    /// bar's own colour is. So it is drawn twice, each pass clipped to the parts it belongs on.
     /// </summary>
-    private void DrawBarLabel(DrawingContext dc, Operation op, Rect rect)
+    private void DrawBarLabel(DrawingContext dc, Operation op, Rect rect,
+        (double From, double To) band, Func<double, double> x)
     {
-        var text = Text(LabelOf(op), Scaled(11.5), Brushes.Black, BoldFace);
-        text.MaxTextWidth = Math.Max(8, rect.Width - 8);
-        text.MaxLineCount = 1;
-        text.Trimming = TextTrimming.CharacterEllipsis;
+        void Draw(Brush brush, Geometry clip)
+        {
+            var text = Text(LabelOf(op), Scaled(11.5), brush, BoldFace);
+            text.MaxTextWidth = Math.Max(8, rect.Width - 8);
+            text.MaxLineCount = 1;
+            text.Trimming = TextTrimming.CharacterEllipsis;
 
-        dc.PushClip(new RectangleGeometry(rect));
-        dc.DrawText(text, new Point(rect.Left + 5, rect.Top + (rect.Height - text.Height) / 2));
-        dc.Pop();
+            dc.PushClip(clip);
+            dc.DrawText(text, new Point(rect.Left + 5, rect.Top + (rect.Height - text.Height) / 2));
+            dc.Pop();
+        }
+
+        var bar = new RectangleGeometry(rect);
+        var marks = ShowOverlaps ? OverlapRects(op, band, rect, x) : new List<Rect>();
+        if (marks.Count == 0)
+        {
+            Draw(TextOn(op), bar);
+            return;
+        }
+
+        // Each marker lies inside the bar, so an even-odd group of the two leaves exactly the part
+        // of the bar still showing its own colour.
+        var unmarked = new GeometryGroup { FillRule = FillRule.EvenOdd };
+        unmarked.Children.Add(bar);
+        var marked = new GeometryGroup();
+        foreach (var mark in marks)
+        {
+            unmarked.Children.Add(new RectangleGeometry(mark));
+            marked.Children.Add(new RectangleGeometry(mark));
+        }
+
+        Draw(TextOn(op), unmarked);
+        Draw(Brushes.Black, marked);
+    }
+
+    /// <summary>Black or white for a bar's label, from the fill the bar is actually drawn in.</summary>
+    private Brush TextOn(Operation op)
+    {
+        if (EffectiveColorBy == ChartColorBy.Robot)
+            return op.HasRobot ? RobotColors.GetTextBrush(op.RobotName) : UnassignedTextBrush;
+
+        return Document?.RegionOf(op) is { } region
+            ? RegionColors.GetTextBrush(region.ColorKey)
+            : UnassignedTextBrush;
     }
 
     private void DrawLinks(DrawingContext dc, Func<double, double> x, double cycle)

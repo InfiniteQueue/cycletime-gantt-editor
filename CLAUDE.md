@@ -80,6 +80,14 @@ their own hit testing - there are no WPF elements per bar, row or region. Two co
   it comes out on the WM_SIZE path where nothing catches it and the app dies.
 - Colours live in `Services/Palette.cs` for the drawn surfaces and `Themes/Dark.xaml` for the XAML
   controls. Keep the two in step.
+- **Fills come from `ColorAllocator`, which picks them in CIELCh** - nine hues spaced evenly round
+  that circle, each taken at the lightness where sRGB lets it be most colourful, then moved clear of
+  half luminance. Equal steps in CIELCh are meant to be equal steps in *perceived* hue; equal steps
+  in HSV are not, so do not reach for HSV here.
+- **Text on a coloured surface asks `ColorAllocator` which of black and white to use** -
+  `GetTextBrush` for an allocated fill, `TextOn` for any other colour. One rule decides it for the
+  filter chips and the bars alike. A bar is not all one colour, though: a clash paints part of it
+  white, so its label is drawn twice, each pass clipped to the parts that colour belongs on.
 
 WPF keys implicit styles on an element's exact runtime type, so a bare `TargetType="Window"` style
 never reaches a subclass. Every window in this app asks for `ThemedWindow` by key.
