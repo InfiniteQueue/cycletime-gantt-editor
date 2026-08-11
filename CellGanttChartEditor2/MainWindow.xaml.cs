@@ -20,8 +20,20 @@ public partial class MainWindow : Window
     private static readonly Brush ConflictOkBrush = Palette.Brush(Color.FromRgb(0x7F, 0xD9, 0x8C));
     private static readonly Brush ConflictBadBrush = Palette.Brush(Color.FromRgb(0xFF, 0x8A, 0x8A));
 
+    /// <summary>How far back ctrl+z goes. Snapshots are small; this is about the user's memory.</summary>
+    private const int UndoDepth = 100;
+
     private readonly ColorAllocator _regionColors = new();
     private readonly ColorAllocator _robotColors = new();
+
+    /// <summary>
+    /// Past states, oldest first, and states undone out of, the most recently undone last.
+    /// Alongside them, <see cref="_baseline"/> is the document as it stood at the end of the last
+    /// refresh - the thing every new state is compared against.
+    /// </summary>
+    private readonly List<DocumentSnapshot> _undo = new();
+    private readonly List<DocumentSnapshot> _redo = new();
+    private DocumentSnapshot? _baseline;
 
     private GanttDocument _document = new();
     private string? _path;
@@ -78,9 +90,12 @@ public partial class MainWindow : Window
         _document = document;
         _path = path;
 
-        _suppressChanges = true;
-        CycleTimeBox.Text = TimeMath.Format(document.CycleTime);
-        _suppressChanges = false;
+        // A new document is not something the old one's history can be applied to.
+        _undo.Clear();
+        _redo.Clear();
+        _baseline = null;
+
+        ShowCycleTime();
 
         Chart.SetDocument(document);
         ImageView.SetImage(document.ImageData);
@@ -117,6 +132,96 @@ public partial class MainWindow : Window
             $"{_document.Robots().Count} robots   |   " +
             $"{_document.Regions.Count} regions   |   " +
             $"{_document.Links.Count} links";
+
+        RecordChange();
+    }
+
+    private void ShowCycleTime()
+    {
+        _suppressChanges = true;
+        CycleTimeBox.Text = TimeMath.Format(_document.CycleTime);
+        _suppressChanges = false;
+    }
+
+    // ----------------------------------------------------------------- undo
+
+    /// <summary>
+    /// Takes the document's picture at the end of every refresh and, when it differs from the last
+    /// one, files that last one away as somewhere ctrl+z can go back to. Every edit in the app ends
+    /// in a refresh, so this is the one place undo has to be wired into - and a refresh that changed
+    /// nothing (a save, a new image, the panel opening) leaves the stack alone.
+    /// </summary>
+    private void RecordChange()
+    {
+        var now = DocumentSnapshot.Capture(_document);
+
+        if (_baseline == null || now.Matches(_baseline))
+        {
+            _baseline = now;
+            return;
+        }
+
+        _undo.Add(_baseline);
+        if (_undo.Count > UndoDepth)
+            _undo.RemoveAt(0);
+        _baseline = now;
+
+        // A fresh change is a new branch: what was undone out of is no longer ahead of the user.
+        _redo.Clear();
+    }
+
+    private void Undo()
+    {
+        if (_undo.Count == 0)
+        {
+            StatusText.Text = "Nothing to undo.";
+            return;
+        }
+
+        var previous = _undo[^1];
+        _undo.RemoveAt(_undo.Count - 1);
+
+        var current = _baseline!;
+        _redo.Add(current);
+        StatusText.Text = $"Undone: {DocumentSnapshot.Describe(previous, current)}.";
+        GoTo(previous);
+    }
+
+    private void Redo()
+    {
+        if (_redo.Count == 0)
+        {
+            StatusText.Text = "Nothing to redo.";
+            return;
+        }
+
+        var next = _redo[^1];
+        _redo.RemoveAt(_redo.Count - 1);
+
+        var current = _baseline!;
+        _undo.Add(current);
+        StatusText.Text = $"Redone: {DocumentSnapshot.Describe(current, next)}.";
+        GoTo(next);
+    }
+
+    /// <summary>
+    /// Puts the document into a state off one of the two stacks. The baseline is moved first, so the
+    /// refresh does not file the step away as a change of its own and send ctrl+z round in circles.
+    /// </summary>
+    private void GoTo(DocumentSnapshot snapshot)
+    {
+        var message = StatusText.Text;
+
+        snapshot.Restore(_document);
+        _baseline = snapshot;
+
+        // The selected bar may be one the step has just taken out of the document.
+        Chart.ClearSelection();
+        ShowCycleTime();
+        RefreshAll();
+
+        // The refresh writes the running totals over it, so the message goes back afterwards.
+        StatusText.Text = message;
     }
 
     private void UpdateConflictCount()
@@ -244,7 +349,8 @@ public partial class MainWindow : Window
         // Start times are absolute and deliberately survive this: only the drawing wraps.
         _document.CycleTime = value;
         CycleTimeBox.Text = TimeMath.Format(_document.CycleTime);
-        Chart.Refresh();
+        // Through the full refresh, so the change is one ctrl+z can take back like any other.
+        RefreshAll();
     }
 
     private void Conflicts_Click(object sender, RoutedEventArgs e)
@@ -617,6 +723,22 @@ public partial class MainWindow : Window
         {
             ImageView.CancelPick();
             e.Handled = true;
+            return;
         }
+
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0 || e.Key is not (Key.Z or Key.Y))
+            return;
+
+        // A text box has an undo of its own. Someone part way through typing means that one.
+        if (Keyboard.FocusedElement is TextBoxBase)
+            return;
+
+        // Ctrl+Y and ctrl+shift+Z both redo; between them they cover what anyone is likely to try.
+        if (e.Key == Key.Y || (Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+            Redo();
+        else
+            Undo();
+
+        e.Handled = true;
     }
 }

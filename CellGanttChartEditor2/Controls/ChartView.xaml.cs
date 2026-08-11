@@ -216,6 +216,17 @@ public partial class ChartView : UserControl
         Surface.InvalidateVisual();
     }
 
+    /// <summary>
+    /// Drops the selection without touching the zoom or the scroll, for when the document changed
+    /// underneath the chart and the selected bar may no longer be in it.
+    /// </summary>
+    public void ClearSelection()
+    {
+        _selectedOperation = null;
+        _selectedLink = null;
+        Surface.InvalidateVisual();
+    }
+
     public void SetDocument(GanttDocument? document)
     {
         Document = document;

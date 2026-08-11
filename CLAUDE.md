@@ -54,6 +54,23 @@ which is why the draft holds the numeric fields as text.
 - Start times are absolute and are never rewritten when the cycle time changes. Only the drawing
   wraps.
 
+## Undo and redo
+
+Ctrl+Z (and ctrl+Y, or ctrl+shift+Z, to come back) is built on snapshots, not on a list of commands. `MainWindow.RefreshAll` is where every edit
+in the app ends up - the chart raises `Edited`, the items panel raises `Edited`, the dialogs return to
+a host method - so it takes a `DocumentSnapshot` there, and when the new one differs from the one
+kept from last time, that older one becomes a place ctrl+z can go back to.
+
+The consequence for new code: **an edit only needs to end in `RefreshAll` to be undoable.** Nothing
+has to announce itself beforehand, and a refresh that changed nothing (a save, a new image) does not
+put a dead step on the stack. Undo hands the state it left to the redo stack; a genuine new change
+clears it, since what was undone is no longer ahead of the user.
+
+A snapshot holds model objects by reference with their fields copied beside them, so restoring puts
+the very same `Operation` back and a chart still pointing at it stays valid. Row layouts are
+deliberately outside it: dragging a row or collapsing a group arranges the view rather than changing
+the chart, and neither should be undoable.
+
 ## Drawing
 
 `ChartView` and `ImageRegionView` render themselves in `OnRender` with a `DrawingContext` and do
