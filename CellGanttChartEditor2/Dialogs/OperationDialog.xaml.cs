@@ -60,7 +60,16 @@ public partial class OperationDialog : Window
         _loading = false;
         SyncRegionFields();
 
-        Loaded += (_, _) => RobotBox.Focus();
+        Loaded += (_, _) =>
+        {
+            var creating = (RegionBox.SelectedItem as RegionChoice)?.IsNew == true;
+            if (creating)
+            {
+                RegionNameBox.Focus();
+                RegionNameBox.SelectAll();
+            }
+            else RobotBox.Focus();
+        };
     }
 
     private List<RegionChoice> Choices()
@@ -118,7 +127,10 @@ public partial class OperationDialog : Window
 
     // ------------------------------------------------------------------ picks
 
-    private void PickRegion_Click(object sender, RoutedEventArgs e) => AskFor(OperationPickRequest.Region);
+    private void PickRegion_Click(object sender, RoutedEventArgs e)
+    {
+        AskFor(OperationPickRequest.Region);
+    }
 
     private void PickRobot_Click(object sender, RoutedEventArgs e)
     {
