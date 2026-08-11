@@ -36,7 +36,16 @@ public partial class ChartView : UserControl
     private const double MinResizeGripBar = 16;
 
     private const double MinOverlapWidth = 5;
-    private const double LinkElbow = 12;
+    private const double LinkElbow = 7;
+
+    /// <summary>
+    /// How far in from a bar's leading edge a link coming from another row lands, so the head sits
+    /// just inside the corner rather than straddling it, and how far out from that edge the arrow
+    /// turns to come at it. The turn is kept close to the target so the run across sits in the gap
+    /// beside it rather than through whatever rows lie between.
+    /// </summary>
+    private const double LinkEdgeInset = 7;
+    private const double LinkApproach = 8;
 
     /// <summary>
     /// A group's own line: a thin strip when expanded, and when collapsed a band a little shorter
@@ -1051,9 +1060,26 @@ public partial class ChartView : UserControl
             var sourceLine = _lines[sourceRow];
             var targetLine = _lines[targetRow];
             var from = new Point(x(sourceBands[^1].To), ScreenTop(sourceLine) + sourceLine.Height / 2);
-            var to = new Point(x(targetBands[0].From), ScreenTop(targetLine) + targetLine.Height / 2);
 
-            var points = Route(from, to);
+            Point to;
+            Point[] points;
+            if (sourceRow == targetRow)
+            {
+                // Along the row: in at the leading edge, as it has always been.
+                to = new Point(x(targetBands[0].From), ScreenTop(targetLine) + targetLine.Height / 2);
+                points = Route(from, to);
+            }
+            else
+            {
+                // Across rows: onto the edge the link is coming from, a little in from the corner,
+                // so the head points at the row the work moves to rather than sideways at it.
+                var rect = BandRect(targetBands[0], ScreenTop(targetLine), targetLine.Height, x);
+                var descending = targetRow > sourceRow;
+                to = new Point(rect.Left + Math.Min(LinkEdgeInset, rect.Width / 2),
+                    descending ? rect.Top : rect.Bottom);
+                points = RouteToEdge(from, to, descending);
+            }
+
             _linkHits.Add((points, link));
 
             var selected = ReferenceEquals(link, _selectedLink);
@@ -1070,11 +1096,31 @@ public partial class ChartView : UserControl
             for (var i = 0; i < points.Length - 1; i++)
                 dc.DrawLine(pen, points[i], points[i + 1]);
 
-            DrawArrowHead(dc, to, head);
+            DrawArrowHead(dc, points[^1], points[^2], head);
 
             if (dimmed)
                 dc.Pop();
         }
+    }
+
+    /// <summary>
+    /// Orthogonal route onto a bar's top or bottom edge, for a link between two rows: out of the
+    /// source's end, down or up past the rows in between, across in the gap just outside the target,
+    /// and onto it. The run across is held next to the target rather than halfway, where with rows
+    /// far apart it would cut through the bars of a row in between.
+    /// </summary>
+    private static Point[] RouteToEdge(Point from, Point to, bool descending)
+    {
+        var stub = from.X + LinkElbow;
+        var approach = descending ? to.Y - LinkApproach : to.Y + LinkApproach;
+        return new[]
+        {
+            from,
+            new Point(stub, from.Y),
+            new Point(stub, approach),
+            new Point(to.X, approach),
+            to,
+        };
     }
 
     /// <summary>Orthogonal route from a source end to a target start, always arriving from the left.</summary>
@@ -1099,10 +1145,20 @@ public partial class ChartView : UserControl
         };
     }
 
-    private static void DrawArrowHead(DrawingContext dc, Point tip, Brush brush)
+    /// <summary>
+    /// The head at the end of a link, pointing the way its last segment travels: along the row for
+    /// one arriving at a bar's leading edge, and down or up for one coming from another row.
+    /// </summary>
+    private static void DrawArrowHead(DrawingContext dc, Point tip, Point previous, Brush brush)
     {
         const double length = 10;
         const double halfWidth = 3.5;
+
+        var run = tip - previous;
+        // A zero-length last segment has no direction to take; fall back to the old sideways head.
+        var travel = run.Length < 1e-6 ? new Vector(1, 0) : run / run.Length;
+        var across = new Vector(-travel.Y, travel.X) * halfWidth;
+        var back = tip - travel * length;
 
         var figure = new PathFigure
         {
@@ -1110,8 +1166,8 @@ public partial class ChartView : UserControl
             IsClosed = true,
             IsFilled = true,
         };
-        figure.Segments.Add(new LineSegment(new Point(tip.X - length, tip.Y - halfWidth), true));
-        figure.Segments.Add(new LineSegment(new Point(tip.X - length, tip.Y + halfWidth), true));
+        figure.Segments.Add(new LineSegment(back + across, true));
+        figure.Segments.Add(new LineSegment(back - across, true));
 
         var geometry = new PathGeometry();
         geometry.Figures.Add(figure);
