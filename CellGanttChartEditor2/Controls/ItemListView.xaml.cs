@@ -97,23 +97,27 @@ public partial class ItemListView : UserControl
             SummaryText.Text = $"{regions.Count} regions, {robots.Count} robots, " +
                                $"{operations.Count} operations";
 
-            AddHeading("Regions", "Add region", () => AddRegionRequested?.Invoke(this, EventArgs.Empty));
+            var regionsContent = new StackPanel();
             if (regions.Count == 0)
-                AddEmptyNote("No regions yet.");
+                regionsContent.Children.Add(NewEmptyNote("No regions yet."));
             foreach (var region in regions)
-                ItemHost.Children.Add(RegionCard(region));
+                regionsContent.Children.Add(RegionCard(region));
 
-            AddHeading("Robots", "Add robot", () => AddRobotRequested?.Invoke(this, EventArgs.Empty));
+            AddCategory("Regions", "Add region", () => AddRegionRequested?.Invoke(this, EventArgs.Empty), regionsContent);
+
+            var robotsContent = new StackPanel();  
             if (robots.Count == 0)
-                AddEmptyNote("No robots yet.");
+                robotsContent.Children.Add(NewEmptyNote("No robots yet."));
             foreach (var robot in robots)
-                ItemHost.Children.Add(RobotCard(robot));
+                robotsContent.Children.Add(RobotCard(robot));
+            AddCategory("Robots", "Add robot", () => AddRobotRequested?.Invoke(this, EventArgs.Empty), robotsContent);
 
-            AddHeading("Operations", "Add operation", () => AddOperationRequested?.Invoke(this, EventArgs.Empty));
+            var operationsContent = new StackPanel();
             if (operations.Count == 0)
-                AddEmptyNote("No operations yet.");
+                operationsContent.Children.Add(NewEmptyNote("No operations yet."));
             foreach (var op in operations)
-                ItemHost.Children.Add(OperationCard(op));
+                operationsContent.Children.Add(OperationCard(op));
+            AddCategory("Operations", "Add operation", () => AddOperationRequested?.Invoke(this, EventArgs.Empty), operationsContent);
         }
         finally
         {
@@ -452,19 +456,21 @@ public partial class ItemListView : UserControl
     // --------------------------------------------------------------- helpers
 
     /// <summary>A section title with the button that adds another one of whatever it lists.</summary>
-    private void AddHeading(string text, string addLabel, Action add)
+    private void AddCategory(string text, string addLabel, Action add, Panel contentStack)
     {
         var row = new Grid { Margin = new Thickness(2, 4, 0, 5) };
+        row.HorizontalAlignment = HorizontalAlignment.Stretch;
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         row.Children.Add(new TextBlock
         {
-            Text = text.ToUpperInvariant(),
+            Text = $"{text.ToUpperInvariant()}  - {contentStack.Children.Count} items",
             FontSize = 10,
             FontWeight = FontWeights.SemiBold,
             Foreground = Palette.Brush(Palette.Muted),
             VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch
         });
 
         var button = new Button
@@ -476,16 +482,19 @@ public partial class ItemListView : UserControl
         button.Click += (_, _) => add();
         Grid.SetColumn(button, 1);
         row.Children.Add(button);
+        row.Cursor = Cursors.Hand;
 
+        row.MouseDown += (s, e) => contentStack.Visibility = contentStack.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         ItemHost.Children.Add(row);
+        ItemHost.Children.Add(contentStack);
     }
 
-    private void AddEmptyNote(string text) => ItemHost.Children.Add(new TextBlock
+    private TextBlock NewEmptyNote(string text) => new TextBlock
     {
         Text = text,
         Foreground = Palette.Brush(Palette.Muted),
         Margin = new Thickness(2, 0, 0, 8),
-    });
+    };
 
     /// <summary>
     /// A read-only property whose value comes from the image, with the crosshair button that goes
