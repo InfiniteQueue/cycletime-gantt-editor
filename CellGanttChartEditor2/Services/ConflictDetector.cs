@@ -26,7 +26,8 @@ public static class ConflictDetector
             var kind = ConflictKind.None;
             if (string.Equals(a.RobotName, b.RobotName, StringComparison.OrdinalIgnoreCase))
                 kind |= ConflictKind.Robot;
-            if (a.RegionId == b.RegionId)
+            // Two operations with no region at all are not thereby in the same place.
+            if (a.HasRegion && a.RegionId == b.RegionId)
                 kind |= ConflictKind.Region;
             if (kind == ConflictKind.None)
                 continue;

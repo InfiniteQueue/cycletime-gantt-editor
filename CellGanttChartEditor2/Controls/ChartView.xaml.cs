@@ -77,6 +77,7 @@ public partial class ChartView : UserControl
     private static readonly Pen GhostPen = MakeGhostPen();
     private static readonly Brush GroupBandBrush = Palette.Brush(Palette.GroupBand);
     private static readonly Brush GroupBlockBrush = Palette.Brush(Palette.GroupBlock);
+    private static readonly Brush NoRegionBrush = Palette.Brush(Palette.GroupBlock);
     private static readonly Pen GroupEdgePen = Palette.Pen(Palette.GroupEdge, 1);
     private static readonly Pen GroupBlockPen = Palette.Pen(Palette.BarOutline, 1);
     private static readonly Pen DropIndicatorPen = Palette.Pen(Palette.DropIndicator, 3);
@@ -384,6 +385,19 @@ public partial class ChartView : UserControl
                         Ghosted = ghosted,
                     });
                 }
+
+                // Operations belonging to no region still have to appear somewhere in a view whose
+                // rows are regions, so they gather in a row of their own at the end.
+                var loose = Document.Operations.Where(o => !o.HasRegion).ToList();
+                if (loose.Count > 0 && (!filtering || loose.Any(o => primary.Contains(o.Id))))
+                    AddRow(new RowInfo
+                    {
+                        Title = "(No region)",
+                        Kind = RowKind.Region,
+                        Key = GanttDocument.NoRegionKey,
+                        Operations = loose.Where(Keep).ToList(),
+                        Ghosted = ghosted,
+                    });
                 break;
 
             default:
@@ -531,6 +545,15 @@ public partial class ChartView : UserControl
         : Document?.RegionOf(op)?.ColorKey ?? string.Empty;
 
     private ColorAllocator Allocator => EffectiveColorBy == ChartColorBy.Robot ? RobotColors : RegionColors;
+
+    /// <summary>
+    /// A bar's fill. Colouring by region leaves an operation that has no region without a key to
+    /// allocate against, so it takes the neutral fill rather than borrowing some region's colour.
+    /// </summary>
+    private Brush FillOf(Operation op) =>
+        EffectiveColorBy == ChartColorBy.Region && !op.HasRegion
+            ? NoRegionBrush
+            : Allocator.GetBrush(ColorKeyOf(op));
 
     private string LabelOf(Operation op)
     {
@@ -888,8 +911,7 @@ public partial class ChartView : UserControl
     private void DrawBar(DrawingContext dc, Operation op, double top, double lineHeight, bool ghosted,
         Func<double, double> x, double cycle)
     {
-        var key = ColorKeyOf(op);
-        var fill = Allocator.GetBrush(key);
+        var fill = FillOf(op);
         var bands = TimeMath.Bands(op.Start, op.Duration, cycle);
         var selected = ReferenceEquals(op, _selectedOperation);
         var isDropTarget = ReferenceEquals(op, _dropTarget);
@@ -1804,8 +1826,9 @@ public partial class ChartView : UserControl
     /// </summary>
     private IReadOnlyCollection<Guid> RegionsOf(object? hit) => hit switch
     {
-        Operation op => new[] { op.RegionId },
-        Line line => OperationsOf(line).Select(o => o.RegionId).Distinct().ToArray(),
+        // An operation with no region names none, rather than naming the empty id.
+        Operation op => op.HasRegion ? new[] { op.RegionId } : Array.Empty<Guid>(),
+        Line line => OperationsOf(line).Where(o => o.HasRegion).Select(o => o.RegionId).Distinct().ToArray(),
         _ => Array.Empty<Guid>(),
     };
 

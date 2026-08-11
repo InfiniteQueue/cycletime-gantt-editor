@@ -324,30 +324,13 @@ public sealed class ImageRegionView : FrameworkElement
         if (hovered)
             thickness *= 1.7;
 
-        var ring = reach * 0.45;
-
         // A dark keyline under the mark, so it holds up over a light photograph as well as a dark
         // one. A halo is not used here: the crosshair is small enough that one would swallow it.
-        var keyline = new Pen(KeylineBrush, thickness + 2);
-        dc.DrawEllipse(null, keyline, centre, ring, ring);
-        DrawArms(dc, keyline, centre, ring, reach);
-
-        var pen = new Pen(stroke, thickness);
-        dc.DrawEllipse(null, pen, centre, ring, ring);
-        DrawArms(dc, pen, centre, ring, reach);
+        CrosshairIcon.Draw(dc, centre, reach, new Pen(KeylineBrush, thickness + 2));
+        CrosshairIcon.Draw(dc, centre, reach, new Pen(stroke, thickness));
 
         if (hovered)
             DrawRobotLabel(dc, robot, centre, reach);
-    }
-
-    /// <summary>The four spokes, stopping short of the ring so the centre stays clear.</summary>
-    private static void DrawArms(DrawingContext dc, Pen pen, Point centre, double ring, double reach)
-    {
-        var gap = ring * 1.35;
-        dc.DrawLine(pen, new Point(centre.X - reach, centre.Y), new Point(centre.X - gap, centre.Y));
-        dc.DrawLine(pen, new Point(centre.X + gap, centre.Y), new Point(centre.X + reach, centre.Y));
-        dc.DrawLine(pen, new Point(centre.X, centre.Y - reach), new Point(centre.X, centre.Y - gap));
-        dc.DrawLine(pen, new Point(centre.X, centre.Y + gap), new Point(centre.X, centre.Y + reach));
     }
 
     /// <summary>The robot's name on the same dark plate the region titles use, under the crosshair.</summary>
@@ -372,6 +355,11 @@ public sealed class ImageRegionView : FrameworkElement
     /// </summary>
     private void DrawRegion(DrawingContext dc, ChartRegion region)
     {
+        // A region with no area is not on the image at all. Checked before converting, because an
+        // empty Rect carries a negative width and mapping one builds a Size that throws.
+        if (!region.HasArea)
+            return;
+
         var screen = ToScreen(region.Bounds);
         if (screen.Width <= 0 || screen.Height <= 0)
             return;

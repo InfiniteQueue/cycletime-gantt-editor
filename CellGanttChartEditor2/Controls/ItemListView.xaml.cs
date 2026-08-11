@@ -128,14 +128,16 @@ public partial class ItemListView : UserControl
             RaiseEdited();
         };
 
-        var redraw = new Button
-        {
-            Content = "Redraw box on image",
-            ToolTip = "Drag a new box on the image for this region.",
-        };
-        redraw.Click += (_, _) => RedrawRegionRequested?.Invoke(this, region);
-        details.Children.Add(Actions(redraw,
-            Delete(() => DeleteRegionRequested?.Invoke(this, region))));
+        // The area is a property like any other, with the crosshair beside it for going and getting
+        // one - the same button that means "point at something on the image" everywhere else.
+        details.Children.Add(WithPick("Area on the image",
+            region.HasArea
+                ? $"{region.Bounds.Width:0} by {region.Bounds.Height:0} pixels at {region.Bounds.X:0}, {region.Bounds.Y:0}"
+                : "None. This region is not drawn on the image.",
+            "Drag a box on the image for this region.",
+            () => RedrawRegionRequested?.Invoke(this, region)));
+
+        details.Children.Add(Actions(Delete(() => DeleteRegionRequested?.Invoke(this, region))));
 
         return Card(key, RegionColors.GetBrush(region.ColorKey), region.Name,
             used == 1 ? "1 operation" : $"{used} operations", details);
@@ -169,27 +171,15 @@ public partial class ItemListView : UserControl
             RaiseEdited();
         });
 
-        details.Children.Add(new TextBlock
-        {
-            Text = placed is { } at
-                ? $"On the image at {at.X:0}, {at.Y:0}"
-                : "Not placed on the image.",
-            Foreground = Palette.Brush(Palette.Muted),
-            Margin = new Thickness(0, 6, 0, 0),
-            TextWrapping = TextWrapping.Wrap,
-        });
+        details.Children.Add(WithPick("Place on the image",
+            placed is { } at ? $"At {at.X:0}, {at.Y:0}" : "Not placed.",
+            "Click the spot on the image where this robot sits.",
+            () => PlaceRobotRequested?.Invoke(this, robot)));
 
-        var place = new Button
-        {
-            Content = placed == null ? "Place on image..." : "Move on image...",
-            ToolTip = "Click a spot on the image to mark where this robot is.",
-        };
-        place.Click += (_, _) => PlaceRobotRequested?.Invoke(this, robot);
-
-        var actions = new List<Button> { place };
+        var actions = new List<Button>();
         if (placed != null)
         {
-            var clear = new Button { Content = "Clear" };
+            var clear = new Button { Content = "Clear place" };
             clear.Click += (_, _) =>
             {
                 var info = Document?.FindRobot(robot);
@@ -365,6 +355,39 @@ public partial class ItemListView : UserControl
         Foreground = Palette.Brush(Palette.Muted),
         Margin = new Thickness(2, 0, 0, 8),
     });
+
+    /// <summary>
+    /// A read-only property whose value comes from the image, with the crosshair button that goes
+    /// and gets it.
+    /// </summary>
+    private FrameworkElement WithPick(string label, string value, string toolTip, Action pick)
+    {
+        var row = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        text.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            Foreground = Palette.Brush(Palette.Muted),
+        });
+        text.Children.Add(new TextBlock { Text = value, TextWrapping = TextWrapping.Wrap });
+        row.Children.Add(text);
+
+        var button = new Button
+        {
+            Style = (Style)FindResource("PickButton"),
+            ToolTip = toolTip,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        button.Click += (_, _) => pick();
+        Grid.SetColumn(button, 1);
+        row.Children.Add(button);
+
+        return row;
+    }
 
     /// <summary>Adds a labelled row to a detail panel and hands the control back.</summary>
     private static T Field<T>(Panel host, string label, T control) where T : FrameworkElement

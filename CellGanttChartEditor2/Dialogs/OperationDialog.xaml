@@ -1,8 +1,8 @@
-﻿<Window x:Class="CellGanttChartEditor2.Dialogs.OperationDialog"
+<Window x:Class="CellGanttChartEditor2.Dialogs.OperationDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Add operation"
-        SizeToContent="Height" Width="440"
+        SizeToContent="Height" Width="470"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize" ShowInTaskbar="False"
         Style="{StaticResource ThemedWindow}">
@@ -29,6 +29,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -38,28 +39,47 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="Region name"/>
-            <TextBox   Grid.Row="0" Grid.Column="1" x:Name="RegionNameBox"/>
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Robot"/>
+            <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="RobotBox" IsEditable="True"/>
+            <Button    Grid.Row="0" Grid.Column="2" x:Name="RobotPickButton"
+                       Style="{StaticResource PickButton}" Click="PickRobot_Click"
+                       ToolTip="Click the spot on the image where this robot sits."/>
 
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="Region category"/>
-            <ComboBox  Grid.Row="1" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text"/>
+            <TextBlock Grid.Row="1" Grid.Column="1" x:Name="RobotPlaceText"
+                       Foreground="{StaticResource MutedBrush}" FontSize="11"
+                       Margin="0,0,0,4" Visibility="Collapsed"/>
 
-            <Separator Grid.Row="2" Grid.ColumnSpan="2" Margin="0,8"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Operation"/>
+            <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="OperationBox" IsEditable="True"/>
 
-            <TextBlock Grid.Row="3" Grid.Column="0" Text="Robot"/>
-            <ComboBox  Grid.Row="3" Grid.Column="1" x:Name="RobotBox" IsEditable="True"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Start time"/>
+            <TextBox   Grid.Row="3" Grid.Column="1" x:Name="StartBox"/>
 
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="Operation"/>
-            <ComboBox  Grid.Row="4" Grid.Column="1" x:Name="OperationBox" IsEditable="True"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Duration"/>
+            <TextBox   Grid.Row="4" Grid.Column="1" x:Name="DurationBox"/>
 
-            <TextBlock Grid.Row="5" Grid.Column="0" Text="Start time"/>
-            <TextBox   Grid.Row="5" Grid.Column="1" x:Name="StartBox"/>
+            <Separator Grid.Row="5" Grid.ColumnSpan="3" Margin="0,10"/>
 
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="Duration"/>
-            <TextBox   Grid.Row="6" Grid.Column="1" x:Name="DurationBox"/>
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Region"/>
+            <ComboBox  Grid.Row="6" Grid.Column="1" x:Name="RegionBox"
+                       SelectionChanged="Region_Changed"/>
+            <Button    Grid.Row="6" Grid.Column="2" x:Name="RegionPickButton"
+                       Style="{StaticResource PickButton}" Click="PickRegion_Click"
+                       ToolTip="Draw a box on the image for a new region, or click one already there."/>
+
+            <TextBlock Grid.Row="7" Grid.Column="0" x:Name="RegionNameLabel" Text="Region name"/>
+            <TextBox   Grid.Row="7" Grid.Column="1" x:Name="RegionNameBox"/>
+
+            <TextBlock Grid.Row="8" Grid.Column="0" x:Name="CategoryLabel" Text="Region category"/>
+            <ComboBox  Grid.Row="8" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text"/>
         </Grid>
+
+        <TextBlock x:Name="RegionAreaText" Foreground="{StaticResource MutedBrush}" FontSize="11"
+                   TextWrapping="Wrap" Margin="0,4,0,0"/>
 
         <TextBlock x:Name="ErrorText" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,8,0,0"
                    Visibility="Collapsed"/>

@@ -302,6 +302,9 @@ public partial class MainWindow : Window
 
     private async void Items_RedrawRegionRequested(object? sender, ChartRegion region)
     {
+        if (!RequireImage("a region's area is a box drawn on it", "Region area"))
+            return;
+
         var pick = await ImageView.PickRegionAsync(allowExisting: false);
         if (pick is not { IsNew: true })
             return;
@@ -325,18 +328,15 @@ public partial class MainWindow : Window
         RefreshAll();
     }
 
-    private async void Items_AddRegionRequested(object? sender, EventArgs e)
+    /// <summary>
+    /// Adds a region with no area. Giving it one is a separate step, with the crosshair in its
+    /// editor - a region is a name and a category first, and a box on the image only if it needs one.
+    /// </summary>
+    private void Items_AddRegionRequested(object? sender, EventArgs e)
     {
-        if (!RequireImage("a region is a box drawn on it", "Add region"))
-            return;
-
-        var pick = await ImageView.PickRegionAsync(allowExisting: false);
-        if (pick is not { IsNew: true })
-            return;
-
         var region = _document.AddRegion(
             _document.UnusedName("Region", _document.Regions.Select(r => r.Name)),
-            pick.NewBounds, RegionCategory.Uncategorised);
+            new Rect(), RegionCategory.Uncategorised);
 
         // Open its editor, so the placeholder name is sitting there ready to be replaced.
         Items.ExpandRegion(region);
@@ -465,40 +465,97 @@ public partial class MainWindow : Window
 
     // ------------------------------------------------------ add / edit flow
 
+    /// <summary>
+    /// Runs the add-operation dialog. Picking something on the image needs the dialog out of the
+    /// way, so the dialog closes, the pick runs, and it reopens on the same draft - which is why
+    /// this is a loop rather than a single ShowDialog.
+    /// </summary>
     private async void AddOperation_Click(object sender, RoutedEventArgs e)
     {
-        if (!RequireImage("operations are defined against a region of it", "Add operation"))
-            return;
-
         AddOperationButton.IsEnabled = false;
         try
         {
-            var pick = await ImageView.PickRegionAsync(allowExisting: true);
-            if (pick == null)
-                return;
-
-            var existing = pick.Existing;
-            var dialog = new OperationDialog(_document, existing) { Owner = this };
-            if (dialog.ShowDialog() != true)
-                return;
-
-            var region = existing ?? _document.AddRegion(dialog.RegionName, pick.NewBounds, dialog.Category);
-
-            _document.AddOperation(new Operation
+            var draft = new OperationDraft();
+            while (true)
             {
-                Name = dialog.OperationName,
-                RobotName = dialog.RobotName,
-                RegionId = region.Id,
-                Start = dialog.Start,
-                Duration = dialog.Duration,
-            });
+                var dialog = new OperationDialog(_document, draft) { Owner = this };
+                var accepted = dialog.ShowDialog() == true;
+                draft = dialog.Draft;
 
+                if (!accepted)
+                    return;
+
+                if (dialog.Request == OperationPickRequest.None)
+                    break;
+
+                await RunPick(dialog.Request, draft);
+            }
+
+            CommitOperation(draft);
             RefreshAll();
         }
         finally
         {
             AddOperationButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>Fetches whatever the dialog asked for from the image, leaving the draft otherwise alone.</summary>
+    private async Task RunPick(OperationPickRequest request, OperationDraft draft)
+    {
+        if (!RequireImage("there is nothing to pick from until one is loaded", "Pick on the image"))
+            return;
+
+        if (request == OperationPickRequest.RobotLocation)
+        {
+            var point = await ImageView.PickPointAsync($"\"{draft.RobotName}\"");
+            if (point != null)
+                draft.RobotLocation = point;
+            return;
+        }
+
+        var pick = await ImageView.PickRegionAsync(allowExisting: true);
+        if (pick == null)
+            return;
+
+        if (pick.Existing is { } existing)
+        {
+            draft.NewRegion = false;
+            draft.RegionId = existing.Id;
+            return;
+        }
+
+        // A box drawn on the image defines a new region; it is only created if the dialog is accepted.
+        draft.NewRegion = true;
+        draft.RegionId = null;
+        draft.NewRegionBounds = pick.NewBounds;
+        if (draft.NewRegionName.Length == 0)
+            draft.NewRegionName = _document.UnusedName("Region", _document.Regions.Select(r => r.Name));
+    }
+
+    private void CommitOperation(OperationDraft draft)
+    {
+        var regionId = Guid.Empty;
+        if (draft.NewRegion)
+            regionId = _document
+                .AddRegion(draft.NewRegionName, draft.NewRegionBounds, draft.Category).Id;
+        else if (draft.RegionId is { } chosen)
+            regionId = chosen;
+
+        OperationDialog.TryParse(draft.Start, out var start);
+        OperationDialog.TryParse(draft.Duration, out var duration);
+
+        _document.AddOperation(new Operation
+        {
+            Name = draft.OperationName,
+            RobotName = draft.RobotName,
+            RegionId = regionId,
+            Start = start,
+            Duration = duration,
+        });
+
+        if (draft.RobotLocation is { } at)
+            _document.RobotDetail(draft.RobotName).Location = at;
     }
 
     private async void ImageView_RegionRenameRequested(object? sender, ChartRegion region)

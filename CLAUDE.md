@@ -1,0 +1,62 @@
+# CellGanttChartEditor2
+
+A WPF (.NET 9) editor for robot cell cycle charts: a reference image with regions marked on it, and
+a looping Gantt chart of the operations carried out in them.
+
+## UI conventions
+
+### The crosshair means "point at something on the image"
+
+Any control that sends the user to the reference image to pick a point or draw an area shows the
+crosshair icon and **no text**. It is the one symbol for that action, and it is used consistently:
+
+- the mark drawn on the image for a robot's place;
+- the button beside the Region field in the add-operation dialog (draw a box, or click an existing
+  region);
+- the button beside the Robot field in the same dialog (place the robot);
+- the buttons in the items panel for a region's area and a robot's place.
+
+**All code that returns or draws this icon lives in `Services/CrosshairIcon.cs`.** Do not redraw the
+shape anywhere else - take the geometry or the drawing helper from that class. The button styling
+that wraps it is the `PickButton` style in `Themes/Dark.xaml`, which is the only place the icon is
+turned into a control.
+
+The reason for the button-with-no-text is that these buttons sit in field rows where a label already
+says what the field is; the icon says what the button does to it.
+
+### Picking closes the dialog
+
+A modal dialog cannot stay up while the user works on the image behind it. The add-operation dialog
+therefore closes when a crosshair button is pressed, the host runs the pick, and the dialog reopens
+on the same `OperationDraft` with the answer filled in. Anything half-typed has to survive that trip,
+which is why the draft holds the numeric fields as text.
+
+## Model rules
+
+- **Robots are named, not owned.** A robot exists while an operation names it. A `RobotInfo` record
+  is its registration: created when the user adds a robot or places one on the image, and removed
+  only by deleting the robot outright. A robot that was never registered goes when its last
+  operation does.
+- **An operation requires a robot; a region is optional.** `Operation.RegionId` is `Guid.Empty` for
+  none - test with `Operation.HasRegion`. Region-less operations gather in a "(No region)" row when
+  the chart's rows are regions, and take a neutral fill when colouring by region.
+- **A region need not have an area.** `ChartRegion.Bounds` may be empty - test with
+  `ChartRegion.HasArea`. Such a region is not drawn on the image but is a region in every other way.
+- **Regions and robots are added and deleted deliberately**, through the items panel. Nothing is
+  pruned automatically because it became empty; deleting one takes the operations defined against it
+  (and their links) with it.
+- Start times are absolute and are never rewritten when the cycle time changes. Only the drawing
+  wraps.
+
+## Drawing
+
+`ChartView` and `ImageRegionView` render themselves in `OnRender` with a `DrawingContext` and do
+their own hit testing - there are no WPF elements per bar, row or region. Two consequences:
+
+- Guard against degenerate sizes. A `Rect` with a negative width throws, and thrown from `OnRender`
+  it comes out on the WM_SIZE path where nothing catches it and the app dies.
+- Colours live in `Services/Palette.cs` for the drawn surfaces and `Themes/Dark.xaml` for the XAML
+  controls. Keep the two in step.
+
+WPF keys implicit styles on an element's exact runtime type, so a bare `TargetType="Window"` style
+never reaches a subclass. Every window in this app asks for `ThemedWindow` by key.

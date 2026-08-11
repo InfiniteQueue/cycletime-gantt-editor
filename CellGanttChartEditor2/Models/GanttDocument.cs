@@ -46,6 +46,12 @@ public sealed class GanttDocument
 
     public static string KeyOf(Guid id) => id.ToString("N");
 
+    /// <summary>
+    /// Row key for the chart's catch-all row of operations belonging to no region. It is a real row
+    /// the user can order and group, so the layouts have to treat it as a live key.
+    /// </summary>
+    public const string NoRegionKey = "no-region";
+
     /// <summary>Raw bytes of the embedded reference image (whatever format the user picked).</summary>
     public byte[]? ImageData { get; set; }
 
@@ -225,7 +231,7 @@ public sealed class GanttDocument
     public void PruneLayouts()
     {
         RobotRows.Prune(Robots());
-        RegionRows.Prune(Regions.Select(r => KeyOf(r.Id)).ToList());
+        RegionRows.Prune(Regions.Select(r => KeyOf(r.Id)).Append(NoRegionKey).ToList());
         OperationRows.Prune(Operations.Select(o => KeyOf(o.Id)).ToList());
     }
 

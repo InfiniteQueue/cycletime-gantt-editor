@@ -12,8 +12,18 @@ public sealed class ChartRegion
 
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Bounds in image pixel coordinates, so swapping the image leaves regions in place.</summary>
+    /// <summary>
+    /// Bounds in image pixel coordinates, so swapping the image leaves regions in place. Empty for a
+    /// region that has not been given an area yet - it is a perfectly good region, it simply is not
+    /// drawn on the image.
+    /// </summary>
     public Rect Bounds { get; set; }
+
+    /// <summary>
+    /// False for a region that is not drawn on the image. Note that WPF's <see cref="Rect.Empty"/>
+    /// carries a negative width, so anything that measures these bounds has to ask this first.
+    /// </summary>
+    public bool HasArea => Bounds.Width > 0 && Bounds.Height > 0;
 
     public RegionCategory Category { get; set; } = RegionCategory.Uncategorised;
 

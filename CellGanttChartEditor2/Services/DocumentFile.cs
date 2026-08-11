@@ -39,10 +39,12 @@ public static class DocumentFile
             {
                 Id = r.Id,
                 Name = r.Name,
-                X = r.Bounds.X,
-                Y = r.Bounds.Y,
-                Width = r.Bounds.Width,
-                Height = r.Bounds.Height,
+                // An arealess region is written as a plain zero box: an empty Rect's infinities are
+                // not something JSON can carry back.
+                X = r.HasArea ? r.Bounds.X : 0,
+                Y = r.HasArea ? r.Bounds.Y : 0,
+                Width = r.HasArea ? r.Bounds.Width : 0,
+                Height = r.HasArea ? r.Bounds.Height : 0,
                 Category = r.Category.ToString(),
             }).ToList(),
             Operations = document.Operations.Select(o => new OperationDto
