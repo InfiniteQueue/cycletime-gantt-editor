@@ -54,6 +54,29 @@
             <TextBox   Grid.Row="5" Grid.Column="1" x:Name="DurationBox"/>
         </Grid>
 
+        <Separator Margin="0,10"/>
+
+        <TextBlock Text="Simultaneous with" FontWeight="SemiBold" Margin="0,0,0,2"/>
+        <TextBlock Text="Work listed here is meant to happen at the same time as this operation, so the two never count as a conflict."
+                   TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
+
+        <StackPanel x:Name="SimultaneousList"/>
+
+        <Grid Margin="0,4,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Choose from the list, or go and point at the bar. Picking on the chart cannot happen
+                 with this dialog up, so that button closes it and the chart reopens it. -->
+            <ComboBox x:Name="SimultaneousBox" Grid.Column="0" VerticalAlignment="Center"
+                      SelectionChanged="Simultaneous_Changed"/>
+            <Button x:Name="PickSimultaneousButton" Grid.Column="1" Content="Pick on chart"
+                    Padding="8,2" Margin="6,0,0,0" Click="PickSimultaneous_Click"
+                    ToolTip="Close this and click the operation on the chart."/>
+        </Grid>
+
         <TextBlock x:Name="DrivenText" TextWrapping="Wrap" Foreground="{StaticResource AccentTextBrush}" Margin="0,8,0,0"
                    Visibility="Collapsed"/>
 

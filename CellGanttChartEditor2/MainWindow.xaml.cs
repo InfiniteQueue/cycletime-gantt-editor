@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private string? _path;
     private bool _suppressChanges;
     private bool _addingOperation;
+    private bool _pickingSimultaneous;
 
     public MainWindow()
     {
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
         Items.DeleteRegionRequested += Items_DeleteRegionRequested;
         Items.DeleteRobotRequested += Items_DeleteRobotRequested;
         Items.DeleteOperationRequested += Items_DeleteOperationRequested;
+        Items.PickSimultaneousRequested += Items_PickSimultaneousRequested;
 
         GroupByBox.ItemsSource = ViewOptions.GroupModes;
         GroupByBox.SelectedIndex = 0;
@@ -495,6 +497,32 @@ public partial class MainWindow : Window
 
         _document.RemoveOperation(op);
         RefreshAll();
+    }
+
+    /// <summary>
+    /// Names the work an operation runs alongside by pointing at it. The panel is not a dialog, so
+    /// nothing has to close: the chart takes the next click and the pairing is made when it comes.
+    /// </summary>
+    private async void Items_PickSimultaneousRequested(object? sender, Operation op)
+    {
+        if (_pickingSimultaneous)
+            return;
+
+        _pickingSimultaneous = true;
+        try
+        {
+            var picked = await Chart.PickOperationAsync(op);
+            if (picked == null)
+                return;
+
+            _document.SetSimultaneous(op, picked, true);
+            Items.ExpandOperation(op);
+            RefreshAll();
+        }
+        finally
+        {
+            _pickingSimultaneous = false;
+        }
     }
 
     private void Items_DeleteRobotRequested(object? sender, string robot)

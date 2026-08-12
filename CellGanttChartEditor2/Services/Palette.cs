@@ -31,6 +31,13 @@ public static class Palette
     /// <summary>Backing plate for the region title drawn over the image.</summary>
     public static readonly Color LabelPlate = Color.FromArgb(200, 0x10, 0x12, 0x16);
 
+    /// <summary>
+    /// The banner that says a pick is running, on the image and on the chart alike. One colour for
+    /// both, because it means the same thing in both: the view is waiting for the user to point at
+    /// something rather than behaving normally.
+    /// </summary>
+    public static readonly Color Banner = Color.FromArgb(0xEE, 0x1F, 0x6F, 0xEB);
+
     // Row groups. The collapsed block is deliberately colourless: it stands for several regions or
     // robots at once, so borrowing any one of their hues would misread.
     public static readonly Color GroupBand = Rgb(0x26, 0x2A, 0x33);

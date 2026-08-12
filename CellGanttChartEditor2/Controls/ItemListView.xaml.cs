@@ -25,8 +25,15 @@ public partial class ItemListView : UserControl
         public override string ToString() => Text;
     }
 
+    /// <summary>Stands for one operation in a list of them.</summary>
+    private sealed record OperationChoice(Operation Op)
+    {
+        public override string ToString() => Op.Name;
+    }
+
     private const string NoRegionText = "(No region)";
     private const string NoRobotText = "(No robot)";
+    private const string AddSimultaneousText = "Add an operation...";
 
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
 
@@ -68,6 +75,12 @@ public partial class ItemListView : UserControl
     public event EventHandler<string>? DeleteRobotRequested;
 
     public event EventHandler<Operation>? DeleteOperationRequested;
+
+    /// <summary>
+    /// The user asked to name the work this operation runs alongside by clicking a bar. The chart is
+    /// the host's, so it runs the pick; this panel only asks.
+    /// </summary>
+    public event EventHandler<Operation>? PickSimultaneousRequested;
 
     /// <summary>Opens an item's editor, so a newly added one lands ready to be named.</summary>
     public void ExpandRegion(ChartRegion region) => _expanded.Add(RegionKey(region));
@@ -313,6 +326,8 @@ public partial class ItemListView : UserControl
         Commit(start, ApplyTiming);
         Commit(duration, ApplyTiming);
 
+        AddSimultaneous(details, op);
+
         details.Children.Add(Actions(Delete(() => DeleteOperationRequested?.Invoke(this, op))));
 
         var swatch = op.HasRegion && region != null ? RegionColors.GetBrush(region.ColorKey)
@@ -323,6 +338,91 @@ public partial class ItemListView : UserControl
                        $"{TimeMath.Format(op.Start)} for {TimeMath.Format(op.Duration)}";
 
         return Card(key, swatch, op.Name, subtitle, details);
+    }
+
+    /// <summary>
+    /// The work an operation is declared to run alongside: what is on the list, a box of what could
+    /// join it, and the button that goes and points at a bar instead. Edits land straight away, the
+    /// way every other field on a card does - there is no OK here to wait for.
+    /// </summary>
+    private void AddSimultaneous(Panel details, Operation op)
+    {
+        if (Document == null)
+            return;
+
+        details.Children.Add(new TextBlock
+        {
+            Text = "Simultaneous with",
+            FontSize = 11,
+            Foreground = Palette.Brush(Palette.Muted),
+            Margin = new Thickness(0, 8, 0, 0),
+        });
+
+        var together = Document.SimultaneousWith(op);
+        if (together.Count == 0)
+            details.Children.Add(NewEmptyNote("Nothing - this operation clashes with whatever it overlaps."));
+
+        foreach (var other in together)
+        {
+            var row = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock
+            {
+                Text = other.Name,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+
+            var remove = new Button { Content = "Remove", Padding = new Thickness(8, 1, 8, 1) };
+            var target = other;
+            remove.Click += (_, _) =>
+            {
+                Document.SetSimultaneous(op, target, false);
+                RaiseEdited();
+            };
+            Grid.SetColumn(remove, 1);
+            row.Children.Add(remove);
+            details.Children.Add(row);
+        }
+
+        var choices = Document.SimultaneousCandidates(op);
+
+        var picker = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // The prompt sits at the top of the list so the box reads as an action and has somewhere to
+        // return to; picking anything below it is the edit.
+        var box = new ComboBox
+        {
+            ItemsSource = new List<object> { AddSimultaneousText }
+                .Concat(choices.Select(o => new OperationChoice(o))).ToList(),
+            SelectedIndex = 0,
+            IsEnabled = choices.Count > 0,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        box.SelectionChanged += (_, _) =>
+        {
+            if (_building || box.SelectedItem is not OperationChoice choice)
+                return;
+            Document.SetSimultaneous(op, choice.Op, true);
+            RaiseEdited();
+        };
+        picker.Children.Add(box);
+
+        var pick = new Button
+        {
+            Content = "Pick on chart",
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(6, 0, 0, 0),
+            ToolTip = "Click the operation on the chart.",
+        };
+        pick.Click += (_, _) => PickSimultaneousRequested?.Invoke(this, op);
+        Grid.SetColumn(pick, 1);
+        picker.Children.Add(pick);
+
+        details.Children.Add(picker);
     }
 
     private List<RegionChoice> RegionChoices()

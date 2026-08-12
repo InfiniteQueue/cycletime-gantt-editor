@@ -31,6 +31,14 @@ therefore closes when a crosshair button is pressed, the host runs the pick, and
 on the same `OperationDraft` with the answer filled in. Anything half-typed has to survive that trip,
 which is why the draft holds the numeric fields as text.
 
+The same applies to the chart: `ChartView.PickOperationAsync` makes the chart stand in for a combo
+box, and `BarEditDialog` closes and reopens on a `BarEditDraft` around it. Both views draw the same
+banner while a pick is running, from `Palette.Banner`, and Esc calls it off. The items panel is not
+modal, so it asks the host for a pick (`PickSimultaneousRequested`) and stays where it is.
+
+**Picking a bar is not a crosshair.** The crosshair means the *image*; a button that sends the user
+to the chart says so in words.
+
 ### The filter chips are whatever the bars are coloured by
 
 Picking a chip means "keep the work wearing this colour", so the set of chips is always
@@ -56,6 +64,11 @@ reason they are not items - there is nothing to select that would mean "the ones
   it. Only the name and the timing are required.
 - **A region need not have an area.** `ChartRegion.Bounds` may be empty - test with
   `ChartRegion.HasArea`. Such a region is not drawn on the image but is a region in every other way.
+- **Operations can be declared simultaneous, and then never conflict.** `Operation.SimultaneousWith`
+  holds the ids; the relation is symmetric and `GanttDocument.SetSimultaneous` is the only thing that
+  should write it, because it writes both sides. `ConflictDetector` reads it symmetrically anyway, so
+  a half-written pair still behaves the way it reads. Nothing else about the pair changes - they
+  still share a row, a colour and a region; the declaration only says the overlap is the design.
 - **Regions, robots and operations are added and deleted deliberately**, through the items panel.
   Nothing is pruned automatically because it became empty; deleting a region or a robot takes the
   operations defined against it (and their links) with it.

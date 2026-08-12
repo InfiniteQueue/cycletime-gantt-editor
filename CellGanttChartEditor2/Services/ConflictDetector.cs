@@ -23,6 +23,12 @@ public static class ConflictDetector
             var a = ops[i];
             var b = ops[j];
 
+            // Work the user has declared simultaneous is meant to overlap. Either side naming the
+            // other is enough - the document keeps both in step, and reading it symmetrically here
+            // means a half-written pair from an older file still behaves the way it reads.
+            if (a.IsSimultaneousWith(b) || b.IsSimultaneousWith(a))
+                continue;
+
             var kind = ConflictKind.None;
             // Two operations with no robot at all are not thereby the same robot double-booked.
             if (a.HasRobot && string.Equals(a.RobotName, b.RobotName, StringComparison.OrdinalIgnoreCase))

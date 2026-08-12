@@ -16,10 +16,10 @@ public static class DocumentFile
     public const string Filter = "Cell Gantt chart (*.cgc)|*.cgc|All files (*.*)|*.*";
 
     /// <summary>
-    /// 2 added the per-mode row layouts, 3 the robot detail. Older files still load; they simply
-    /// have none of what the later versions added.
+    /// 2 added the per-mode row layouts, 3 the robot detail, 4 the simultaneous pairings. Older
+    /// files still load; they simply have none of what the later versions added.
     /// </summary>
-    private const int CurrentVersion = 3;
+    private const int CurrentVersion = 4;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -55,6 +55,7 @@ public static class DocumentFile
                 RegionId = o.RegionId,
                 Start = o.Start,
                 Duration = o.Duration,
+                SimultaneousWith = o.SimultaneousWith.Count == 0 ? null : o.SimultaneousWith.ToList(),
             }).ToList(),
             Links = document.Links.Select(l => new LinkDto
             {
@@ -141,6 +142,20 @@ public static class DocumentFile
                 TargetId = l.TargetId,
                 Lag = l.Lag,
             });
+        }
+
+        // Pairings are written on both operations, but going through the document rather than
+        // copying the lists straight across repairs a file where only one side was written and drops
+        // any id whose operation did not survive.
+        foreach (var o in dto.Operations)
+        {
+            var op = document.FindOperation(o.Id);
+            if (op == null || o.SimultaneousWith == null)
+                continue;
+            foreach (var other in o.SimultaneousWith
+                         .Select(document.FindOperation)
+                         .Where(x => x != null))
+                document.SetSimultaneous(op, other!, true);
         }
 
         document.PruneOrphans();
@@ -243,6 +258,7 @@ public static class DocumentFile
         public Guid RegionId { get; set; }
         public double Start { get; set; }
         public double Duration { get; set; }
+        public List<Guid>? SimultaneousWith { get; set; }
     }
 
     private sealed class LinkDto

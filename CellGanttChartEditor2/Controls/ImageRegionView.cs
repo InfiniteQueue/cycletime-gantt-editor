@@ -51,7 +51,7 @@ public sealed class ImageRegionView : FrameworkElement
 
     private static readonly Brush Background = Palette.Brush(Palette.ImageSurface);
     private static readonly Brush LabelPlateBrush = Palette.Brush(Palette.LabelPlate);
-    private static readonly Brush BannerBrush = Palette.Brush(Color.FromArgb(0xEE, 0x1F, 0x6F, 0xEB));
+    private static readonly Brush BannerBrush = Palette.Brush(Palette.Banner);
     private static readonly Brush HintBrush = Palette.Brush(Palette.Muted);
     private static readonly Brush CrosshairBrush = Palette.Brush(Palette.Crosshair);
     private static readonly Brush KeylineBrush = Palette.Brush(Color.FromArgb(0xB0, 0x10, 0x12, 0x16));

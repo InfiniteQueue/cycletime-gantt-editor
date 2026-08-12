@@ -19,8 +19,13 @@ namespace CellGanttChartEditor2.Services;
 /// </summary>
 public sealed class DocumentSnapshot
 {
+    /// <summary>
+    /// <paramref name="Simultaneous"/> is the operation's pairings written out as text rather than
+    /// held as a list, because the record's equality is what decides whether an edit happened and
+    /// two lists holding the same ids are still two different lists.
+    /// </summary>
     private sealed record OperationState(Operation Op, string Name, string Robot, Guid Region,
-        double Start, double Duration);
+        double Start, double Duration, string Simultaneous);
 
     private sealed record LinkState(OperationLink Link, Guid Source, Guid Target, double Lag);
 
@@ -40,7 +45,7 @@ public sealed class DocumentSnapshot
 
         foreach (var op in document.Operations)
             snapshot._operations.Add(new OperationState(op, op.Name, op.RobotName, op.RegionId,
-                op.Start, op.Duration));
+                op.Start, op.Duration, Ids(op.SimultaneousWith)));
 
         foreach (var link in document.Links)
             snapshot._links.Add(new LinkState(link, link.SourceId, link.TargetId, link.Lag));
@@ -70,6 +75,8 @@ public sealed class DocumentSnapshot
             state.Op.RegionId = state.Region;
             state.Op.Start = state.Start;
             state.Op.Duration = state.Duration;
+            state.Op.SimultaneousWith.Clear();
+            state.Op.SimultaneousWith.AddRange(Ids(state.Simultaneous));
             document.Operations.Add(state.Op);
         }
 
@@ -136,6 +143,8 @@ public sealed class DocumentSnapshot
                 return $"the timing of \"{was.Name}\"";
             if (now.Name != was.Name)
                 return $"renaming \"{was.Name}\"";
+            if (now.Simultaneous != was.Simultaneous)
+                return $"what \"{was.Name}\" runs alongside";
             if (now.Robot != was.Robot || now.Region != was.Region)
                 return $"the change to \"{was.Name}\"";
         }
@@ -149,6 +158,12 @@ public sealed class DocumentSnapshot
 
         return "the last change";
     }
+
+    private static string Ids(IEnumerable<Guid> ids) => string.Join(",", ids);
+
+    private static IEnumerable<Guid> Ids(string text) => text.Length == 0
+        ? Enumerable.Empty<Guid>()
+        : text.Split(',').Select(Guid.Parse);
 
     private static OperationState? Find(DocumentSnapshot snapshot, Operation op) =>
         snapshot._operations.FirstOrDefault(s => ReferenceEquals(s.Op, op));

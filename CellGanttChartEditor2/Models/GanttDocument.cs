@@ -179,8 +179,20 @@ public sealed class GanttDocument
     public void RemoveOperation(Operation op)
     {
         Operations.Remove(op);
-        Links.RemoveAll(l => l.SourceId == op.Id || l.TargetId == op.Id);
+        Detach(op);
         PruneOrphans();
+    }
+
+    /// <summary>
+    /// Clears everything the rest of the document holds about an operation that has just been taken
+    /// out of it: the links at either end, and any pairing that named it as simultaneous. Every
+    /// deletion path goes through here, so nothing is left pointing at a bar that no longer exists.
+    /// </summary>
+    private void Detach(Operation op)
+    {
+        Links.RemoveAll(l => l.SourceId == op.Id || l.TargetId == op.Id);
+        foreach (var other in Operations)
+            other.SimultaneousWith.Remove(op.Id);
     }
 
     public void RemoveLink(OperationLink link) => Links.Remove(link);
@@ -194,7 +206,7 @@ public sealed class GanttDocument
         foreach (var op in Operations.Where(o => o.RegionId == region.Id).ToList())
         {
             Operations.Remove(op);
-            Links.RemoveAll(l => l.SourceId == op.Id || l.TargetId == op.Id);
+            Detach(op);
         }
 
         Regions.Remove(region);
@@ -213,7 +225,7 @@ public sealed class GanttDocument
                      .ToList())
         {
             Operations.Remove(op);
-            Links.RemoveAll(l => l.SourceId == op.Id || l.TargetId == op.Id);
+            Detach(op);
         }
 
         RobotDetails.RemoveAll(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -347,6 +359,57 @@ public sealed class GanttDocument
             current = incoming.SourceId;
         }
         return true;
+    }
+
+    // -------------------------------------------------------- simultaneity
+
+    /// <summary>
+    /// The operations <paramref name="op"/> is declared simultaneous with, in document order. Ids
+    /// naming an operation that is no longer here are skipped rather than returned as blanks.
+    /// </summary>
+    public List<Operation> SimultaneousWith(Operation op) =>
+        Operations.Where(o => op.SimultaneousWith.Contains(o.Id)).ToList();
+
+    /// <summary>
+    /// Operations that could be added to <paramref name="op"/>'s list: everything except itself and
+    /// what is already on it.
+    /// </summary>
+    public List<Operation> SimultaneousCandidates(Operation op) => Operations
+        .Where(o => o.Id != op.Id && !op.SimultaneousWith.Contains(o.Id))
+        .ToList();
+
+    /// <summary>Declares a pair simultaneous, or takes the declaration back. Both sides are written.</summary>
+    public void SetSimultaneous(Operation a, Operation b, bool together)
+    {
+        if (a.Id == b.Id)
+            return;
+
+        Apply(a, b.Id);
+        Apply(b, a.Id);
+
+        void Apply(Operation op, Guid other)
+        {
+            if (together)
+            {
+                if (!op.SimultaneousWith.Contains(other))
+                    op.SimultaneousWith.Add(other);
+            }
+            else
+            {
+                op.SimultaneousWith.Remove(other);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Replaces the whole of <paramref name="op"/>'s list, which is what a dialog hands back. Pairs
+    /// dropped from it are unpaired on the other side too, so the two never disagree.
+    /// </summary>
+    public void SetSimultaneous(Operation op, IEnumerable<Guid> ids)
+    {
+        var wanted = ids.Where(id => id != op.Id).ToHashSet();
+        foreach (var other in Operations.Where(o => o.Id != op.Id).ToList())
+            SetSimultaneous(op, other, wanted.Contains(other.Id));
     }
 
     public void SetLinkLag(OperationLink link, double lag)

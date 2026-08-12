@@ -72,6 +72,7 @@ public partial class ChartView : UserControl
     private static readonly Brush RowBrushB = Palette.Brush(Palette.RowB);
     private static readonly Brush TextBrush = Palette.Brush(Palette.Text);
     private static readonly Brush MutedBrush = Palette.Brush(Palette.Muted);
+    private static readonly Brush BannerBrush = Palette.Brush(Palette.Banner);
     private static readonly Pen GridPen = Palette.Pen(Palette.Grid, 1);
     private static readonly Pen DividerPen = Palette.Pen(Palette.Grid, 1.5);
     private static readonly Pen CycleEdgePen = Palette.Pen(Palette.CycleEdge, 1.5);
@@ -143,6 +144,13 @@ public partial class ChartView : UserControl
     private double _dragOriginalDuration;
     private Operation? _dropTarget;
 
+    // Bar pick: the chart standing in for a combo box while a dialog waits for the user to point at
+    // an operation. Null when no pick is running.
+    private TaskCompletionSource<Operation?>? _barPick;
+    private string _barPickHint = string.Empty;
+    private Operation? _barPickExclude;
+    private bool _editingBar;
+
     private object? _hovered;
     private TextBox? _headerEditor;
     private Viewbox? _headerEditorBox;
@@ -209,6 +217,39 @@ public partial class ChartView : UserControl
         ? op.HasRobot && RobotFilter.Contains(op.RobotName)
         : RegionFilter.Contains(op.RegionId);
 
+    /// <summary>True while the chart is waiting for the user to click an operation.</summary>
+    public bool IsPickingBar => _barPick != null;
+
+    /// <summary>
+    /// Asks the user to click a bar, the chart's answer to picking something from a list. The one
+    /// asking is named in the banner, and is itself excluded from what can be clicked. Resolves to
+    /// null if the pick is cancelled with Esc or a click on empty space.
+    /// </summary>
+    public Task<Operation?> PickOperationAsync(Operation asking)
+    {
+        CancelPick();
+        _barPickExclude = asking;
+        _barPickHint = $"Click the operation \"{asking.Name}\" runs alongside. Esc to cancel.";
+        _barPick = new TaskCompletionSource<Operation?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Surface.Cursor = Cursors.Cross;
+        Focus();
+        Surface.InvalidateVisual();
+        return _barPick.Task;
+    }
+
+    /// <summary>Cancels a bar pick, if one is running.</summary>
+    public void CancelPick() => CompleteBarPick(null);
+
+    private void CompleteBarPick(Operation? picked)
+    {
+        var pick = _barPick;
+        _barPick = null;
+        _barPickExclude = null;
+        Surface.Cursor = null;
+        Surface.InvalidateVisual();
+        pick?.TrySetResult(picked);
+    }
+
     /// <summary>Drops every filter, whichever kind is in use.</summary>
     public void ClearFilters()
     {
@@ -265,6 +306,9 @@ public partial class ChartView : UserControl
         Document = document;
         _selectedOperation = null;
         _selectedLink = null;
+        // A pick left running against the old document would never be answered, and whatever is
+        // waiting on it would wait for good.
+        CancelPick();
         ClearFilters();
         _highlightedRegions.Clear();
         _zoom = 1;
@@ -722,9 +766,40 @@ public partial class ChartView : UserControl
         {
             var hint = Text(Document.Operations.Count == 0
                 ? "No operations yet - use \"Add operation\" to place the first one."
-                : "Nothing matches the current region filter.", 13, MutedBrush, Face);
+                : "Nothing matches the current filter.", 13, MutedBrush, Face);
             dc.DrawText(hint, new Point(HeaderWidth + 20, RulerHeight + 20));
         }
+
+        if (IsPickingBar)
+            DrawHint(dc, size, _barPickHint);
+    }
+
+    /// <summary>
+    /// Banner across the top while a pick is running. The same shape and colour the image view uses
+    /// for the same thing, so the two reads as one gesture wherever the user is pointing.
+    /// </summary>
+    private void DrawHint(DrawingContext dc, Size size, string message)
+    {
+        var text = Text(message, 12, Brushes.White, Face);
+        var w = text.Width + 24;
+        var h = text.Height + 12;
+        var x = Math.Max(0, (size.Width - w) / 2);
+
+        var geometry = new StreamGeometry();
+        using (var ctx = geometry.Open())
+        {
+            const double r = 6;
+            ctx.BeginFigure(new Point(x, 0), true, true);
+            ctx.LineTo(new Point(x + w, 0), true, false);
+            ctx.LineTo(new Point(x + w, h - r), true, false);
+            ctx.ArcTo(new Point(x + w - r, h), new Size(r, r), 0, false, SweepDirection.Clockwise, true, false);
+            ctx.LineTo(new Point(x + r, h), true, false);
+            ctx.ArcTo(new Point(x, h - r), new Size(r, r), 0, false, SweepDirection.Clockwise, true, false);
+        }
+        geometry.Freeze();
+
+        dc.DrawGeometry(BannerBrush, null, geometry);
+        dc.DrawText(text, new Point(x + 12, 6));
     }
 
     private void DrawRowBands(DrawingContext dc, Size size)
@@ -1412,6 +1487,16 @@ public partial class ChartView : UserControl
             position.X > Surface.ActualWidth || position.Y > Surface.ActualHeight)
             return;
 
+        // A pick takes the whole surface: a click either answers it or cancels it, and nothing is
+        // selected, dragged or opened on the way past.
+        if (IsPickingBar)
+        {
+            var picked = HitBar(position, exclude: _barPickExclude);
+            CompleteBarPick(picked);
+            e.Handled = true;
+            return;
+        }
+
         if (e.ClickCount == 2)
         {
             HandleDoubleClick(position);
@@ -1809,6 +1894,15 @@ public partial class ChartView : UserControl
         }
         else if (e.Key == Key.Escape)
         {
+            // Esc calls off a pick before it drops the selection: while one is running it is the
+            // only thing the key could sensibly mean.
+            if (IsPickingBar)
+            {
+                CancelPick();
+                e.Handled = true;
+                return;
+            }
+
             _selectedOperation = null;
             _selectedLink = null;
             Surface.InvalidateVisual();
@@ -1848,6 +1942,50 @@ public partial class ChartView : UserControl
         }
     }
 
+    /// <summary>
+    /// Runs the bar editor. It is a loop rather than a single ShowDialog because naming the work an
+    /// operation runs alongside can be done by pointing at it on this very chart, which a modal
+    /// dialog covers: the dialog closes, the pick runs here, and it opens again on the same draft.
+    /// </summary>
+    private async void EditBar(Operation bar)
+    {
+        // The flow lets go of the chart while a pick runs, so a second double-click has to be shut
+        // out rather than opening a second dialog onto the same bar.
+        if (_editingBar || Document == null)
+            return;
+
+        _editingBar = true;
+        try
+        {
+            var draft = BarEditDraft.From(bar);
+            BarEditDialog dialog;
+            while (true)
+            {
+                dialog = new BarEditDialog(Document, bar, draft) { Owner = Window.GetWindow(this) };
+                var accepted = dialog.ShowDialog() == true;
+                draft = dialog.Draft;
+
+                if (!accepted)
+                    return;
+                if (!dialog.PickRequested)
+                    break;
+
+                var picked = await PickOperationAsync(bar);
+                if (picked != null && !draft.Simultaneous.Contains(picked.Id))
+                    draft.Simultaneous.Add(picked.Id);
+            }
+
+            bar.Name = dialog.OperationName;
+            Document.SetSimultaneous(bar, draft.Simultaneous);
+            Document.EditTiming(bar, dialog.Start, dialog.Duration);
+            RaiseEdited();
+        }
+        finally
+        {
+            _editingBar = false;
+        }
+    }
+
     private void HandleDoubleClick(Point position)
     {
         if (Document == null)
@@ -1856,13 +1994,7 @@ public partial class ChartView : UserControl
         var bar = HitBar(position);
         if (bar != null)
         {
-            var dialog = new BarEditDialog(Document, bar) { Owner = Window.GetWindow(this) };
-            if (dialog.ShowDialog() == true)
-            {
-                bar.Name = dialog.OperationName;
-                Document.EditTiming(bar, dialog.Start, dialog.Duration);
-                RaiseEdited();
-            }
+            EditBar(bar);
             return;
         }
 

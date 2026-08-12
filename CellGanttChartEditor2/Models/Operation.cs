@@ -35,5 +35,17 @@ public sealed class Operation
 
     public double End => Start + Duration;
 
+    /// <summary>
+    /// Operations this one is deliberately carried out alongside, and therefore never conflicts with
+    /// however much they overlap. Two robots handing a part between them share a region on purpose;
+    /// saying so here is how the user tells the chart that the overlap is the design, not a mistake.
+    ///
+    /// The relation is symmetric and <see cref="GanttDocument"/> keeps it that way - both operations
+    /// name each other - so nothing has to guess which side of a pair to ask.
+    /// </summary>
+    public List<Guid> SimultaneousWith { get; } = new();
+
+    public bool IsSimultaneousWith(Operation other) => SimultaneousWith.Contains(other.Id);
+
     public override string ToString() => Name;
 }
