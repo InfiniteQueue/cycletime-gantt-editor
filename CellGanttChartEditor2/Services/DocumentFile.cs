@@ -55,6 +55,7 @@ public static class DocumentFile
                 RegionId = o.RegionId,
                 Start = o.Start,
                 Duration = o.Duration,
+                Notes = o.Notes,
                 SimultaneousWith = o.SimultaneousWith.Count == 0 ? null : o.SimultaneousWith.ToList(),
             }).ToList(),
             Links = document.Links.Select(l => new LinkDto
@@ -116,6 +117,7 @@ public static class DocumentFile
                 RegionId = o.RegionId,
                 Start = o.Start,
                 Duration = Math.Max(0, o.Duration),
+                Notes = o.Notes
             });
         }
 
@@ -259,6 +261,7 @@ public static class DocumentFile
         public double Start { get; set; }
         public double Duration { get; set; }
         public List<Guid>? SimultaneousWith { get; set; }
+        public string? Notes { get; set; }
     }
 
     private sealed class LinkDto

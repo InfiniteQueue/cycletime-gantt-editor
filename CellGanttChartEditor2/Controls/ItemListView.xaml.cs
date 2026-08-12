@@ -326,6 +326,23 @@ public partial class ItemListView : UserControl
         Commit(start, ApplyTiming);
         Commit(duration, ApplyTiming);
 
+        var notes = Field(details, "Notes", new TextBox
+        {
+            Text = op.Notes,
+            AcceptsReturn = true,
+            Height = 60,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        });
+
+        Commit(notes, () =>
+        {
+            var value = notes.Text.Trim();
+            if (value == op.Notes)
+                return;
+            op.Notes = value;
+            RaiseEdited();
+        });
+
         AddSimultaneous(details, op);
 
         details.Children.Add(Actions(Delete(() => DeleteOperationRequested?.Invoke(this, op))));

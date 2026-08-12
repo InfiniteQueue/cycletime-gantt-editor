@@ -45,6 +45,8 @@ public sealed class Operation
     /// </summary>
     public List<Guid> SimultaneousWith { get; } = new();
 
+    public string? Notes { get; set; }
+
     public bool IsSimultaneousWith(Operation other) => SimultaneousWith.Contains(other.Id);
 
     public override string ToString() => Name;

@@ -1976,6 +1976,7 @@ public partial class ChartView : UserControl
             }
 
             bar.Name = dialog.OperationName;
+            bar.Notes = dialog.Notes;
             Document.SetSimultaneous(bar, draft.Simultaneous);
             Document.EditTiming(bar, dialog.Start, dialog.Duration);
             RaiseEdited();

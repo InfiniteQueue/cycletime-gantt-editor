@@ -5,7 +5,8 @@
         SizeToContent="Height" Width="470"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize" ShowInTaskbar="False"
-        Style="{StaticResource ThemedWindow}">
+        Style="{StaticResource ThemedWindow}"
+        >
     <!-- BasedOn keeps the app-level dark styles; a bare implicit style would drop back to the
          default light templates. -->
     <Window.Resources>
@@ -32,6 +33,7 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -73,6 +75,9 @@
 
             <TextBlock Grid.Row="7" Grid.Column="0" Text="Duration"/>
             <TextBox   Grid.Row="7" Grid.Column="1" x:Name="DurationBox" Height="29"/>
+            
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="Notes"/>
+            <TextBox   Grid.Row="8" Grid.Column="1" x:Name="NotesBox" Height="auto" MinHeight="35" TextWrapping="Wrap" KeyDown="NotesBox_KeyDown"/>
 
         </Grid>
 

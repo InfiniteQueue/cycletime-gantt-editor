@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using CellGanttChartEditor2.Models;
 using CellGanttChartEditor2.Services;
 
@@ -37,6 +38,8 @@ public partial class BarEditDialog : Window
     /// <summary>True when the dialog closed to let the user click an operation on the chart.</summary>
     public bool PickRequested { get; private set; }
 
+    public string? Notes { get; private set; }
+
     public BarEditDialog(GanttDocument document, Operation operation, BarEditDraft draft)
     {
         InitializeComponent();
@@ -50,6 +53,7 @@ public partial class BarEditDialog : Window
         RegionText.Text = document.RegionOf(operation)?.Name ?? "(none)";
         StartBox.Text = draft.Start;
         DurationBox.Text = draft.Duration;
+        NotesBox.Text = draft.Notes;
 
         ShowSimultaneous();
 
@@ -188,6 +192,7 @@ public partial class BarEditDialog : Window
         OperationName = name;
         Start = start;
         Duration = duration;
+        Notes = NotesBox.Text.Trim();
         DialogResult = true;
     }
 
@@ -197,6 +202,17 @@ public partial class BarEditDialog : Window
         Draft.OperationName = OperationBox.Text;
         Draft.Start = StartBox.Text;
         Draft.Duration = DurationBox.Text;
+    }
+
+    private void NotesBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            var selectionStart = NotesBox.SelectionStart;
+            NotesBox.Text = NotesBox.Text.Insert(selectionStart, "\n");
+            NotesBox.SelectionStart = selectionStart + 1;
+            e.Handled = true;
+        }
     }
 
     private void Fail(string message)
@@ -218,6 +234,8 @@ public sealed class BarEditDraft
     public string Duration { get; set; } = string.Empty;
     public List<Guid> Simultaneous { get; } = new();
 
+    public string? Notes { get; set; } = string.Empty;
+
     public static BarEditDraft From(Operation op)
     {
         var draft = new BarEditDraft
@@ -225,6 +243,7 @@ public sealed class BarEditDraft
             OperationName = op.Name,
             Start = TimeMath.Format(op.Start),
             Duration = TimeMath.Format(op.Duration),
+            Notes = op.Notes
         };
         draft.Simultaneous.AddRange(op.SimultaneousWith);
         return draft;

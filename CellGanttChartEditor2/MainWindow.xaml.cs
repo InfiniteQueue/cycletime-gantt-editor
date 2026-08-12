@@ -755,6 +755,7 @@ public partial class MainWindow : Window
             RegionId = regionId,
             Start = start,
             Duration = duration,
+            Notes = draft.Notes,
         });
 
         // No name, no robot: there is nothing to register a place against.

@@ -32,6 +32,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- The name is editable here: double-clicking a bar is the gesture for renaming an
@@ -52,6 +53,11 @@
 
             <TextBlock Grid.Row="5" Grid.Column="0" Text="Duration"/>
             <TextBox   Grid.Row="5" Grid.Column="1" x:Name="DurationBox"/>
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Notes"/>
+            <ScrollViewer Grid.Row="6" Grid.Column="1" MaxHeight="85" Height="auto" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <TextBox Grid.Column="1" x:Name="NotesBox" TextWrapping="Wrap" KeyDown="NotesBox_KeyDown" MinHeight="35" VerticalContentAlignment="Center"/>
+            </ScrollViewer>
         </Grid>
 
         <Separator Margin="0,10"/>

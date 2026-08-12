@@ -63,6 +63,7 @@ public partial class OperationDialog : Window
         StartBox.Text = draft.Start;
         DurationBox.Text = draft.Duration;
         RegionNameBox.Text = draft.NewRegionName;
+        NotesBox.Text = draft.Notes;
 
         _loading = false;
         SyncRegionFields();
@@ -193,6 +194,7 @@ public partial class OperationDialog : Window
         Draft.OperationName = OperationBox.Text.Trim();
         Draft.Start = StartBox.Text;
         Draft.Duration = DurationBox.Text;
+        Draft.Notes = NotesBox.Text;
     }
 
     // ------------------------------------------------------------- acceptance
@@ -248,6 +250,17 @@ public partial class OperationDialog : Window
     private void OperationBox_KeyDown(object sender, KeyEventArgs e)
     {
         userTypedOpName = true;
+    }
+
+    private void NotesBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            var selectionStart = NotesBox.SelectionStart;
+            NotesBox.Text = NotesBox.Text.Insert(selectionStart, "\n");
+            NotesBox.SelectionStart = selectionStart + 1;
+            e.Handled = true;
+        }
     }
 
     internal static bool TryParse(string text, out double value) =>

@@ -46,4 +46,5 @@ public sealed class OperationDraft
     public string Start { get; set; } = "0";
 
     public string Duration { get; set; } = "5";
+    public string Notes { get; set; } = string.Empty;
 }
