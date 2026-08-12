@@ -145,6 +145,7 @@ public partial class ChartView : UserControl
 
     private object? _hovered;
     private TextBox? _headerEditor;
+    private Viewbox? _headerEditorBox;
     private Line? _headerEditorLine;
 
     // Row drag: which header was grabbed, and where releasing would put it.
@@ -1293,19 +1294,30 @@ public partial class ChartView : UserControl
         if (Document == null)
             return;
 
+        CommitHeaderEditor(); //Header editor display position will become invalid after any scroll or zoom, so commit and hide the editor
+
         var position = e.GetPosition(Surface);
 
-        // Ctrl+wheel stretches or squashes the rows, pinned to the row under the cursor so the
-        // thing being looked at stays put. Offered over the headers too, since that is as much
-        // "the chart" as the bars are.
-        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+
+        //Scoll normally when holding shift
+        //if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        //{
+        //    e.Handled = false;
+        //    base.OnMouseWheel(e);
+        //    return;
+        //}
+
+            // Ctrl+wheel stretches or squashes the rows, pinned to the row under the cursor so the
+            // thing being looked at stays put. Offered over the headers too, since that is as much
+            // "the chart" as the bars are.
+            if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
             ZoomRows(e.Delta > 0 ? 1.15 : 1 / 1.15, position.Y);
             e.Handled = true;
             return;
         }
 
-        if (position.X < HeaderWidth)
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0 || position.X < HeaderWidth)
         {
             _scrollY = Math.Max(0, _scrollY - Math.Sign(e.Delta) * RowPitch);
             Surface.InvalidateVisual();
@@ -2024,14 +2036,16 @@ public partial class ChartView : UserControl
         _headerEditor = new TextBox
         {
             Text = line.Group?.Name ?? line.Row?.Title ?? string.Empty,
-            Width = rect.Width - 8,
-            Height = height,
+            HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(2),
         };
 
-        Canvas.SetLeft(_headerEditor, rect.Left + 4);
-        Canvas.SetTop(_headerEditor, rect.Top + (rect.Height - height) / 2);
-        Overlay.Children.Add(_headerEditor);
+        _headerEditorBox = new Viewbox() { Stretch = Stretch.Fill, Height = height, Child = _headerEditor, Width = rect.Width -8, HorizontalAlignment = HorizontalAlignment.Left, StretchDirection = StretchDirection.DownOnly };
+
+        Canvas.SetLeft(_headerEditorBox, rect.Left + 4);
+        Canvas.SetTop(_headerEditorBox, rect.Top + (rect.Height - height) / 2);
+        _headerEditor.Width = _headerEditorBox.Width;
+        Overlay.Children.Add(_headerEditorBox);
 
         _headerEditor.KeyDown += (_, e) =>
         {
@@ -2061,12 +2075,14 @@ public partial class ChartView : UserControl
     {
         var editor = _headerEditor;
         var line = _headerEditorLine;
-        if (editor == null || line == null || Document == null)
+        var editorBox = _headerEditorBox;
+        if (editor == null || line == null || Document == null || editorBox == null)
             return;
 
         _headerEditor = null;
         _headerEditorLine = null;
-        Overlay.Children.Remove(editor);
+        _headerEditorBox = null;
+        Overlay.Children.Remove(editorBox);
 
         var name = editor.Text.Trim();
         if (name.Length == 0)
@@ -2120,10 +2136,12 @@ public partial class ChartView : UserControl
     private void CancelHeaderEditor()
     {
         var editor = _headerEditor;
+        var editorBox = _headerEditorBox;
         _headerEditor = null;
         _headerEditorLine = null;
+        _headerEditorBox = null;
         if (editor != null)
-            Overlay.Children.Remove(editor);
+            Overlay.Children.Remove(_headerEditorBox);
         Surface.InvalidateVisual();
     }
 
