@@ -8,10 +8,10 @@ namespace CellGanttChartEditor2.Models;
 public enum RegionCategory
 {
     Uncategorised = 0,
-    PlaceholderCategoryA = 1,
-    PlaceholderCategoryB = 2,
-    PlaceholderCategoryC = 3,
-    PlaceholderCategoryD = 4,
+    GeoStation = 1,
+    Sealer = 2,
+    TipChanger = 3,
+    WeldStand = 4,
 }
 
 public static class RegionCategoryInfo
@@ -20,10 +20,10 @@ public static class RegionCategoryInfo
     public static string Display(RegionCategory category) => category switch
     {
         RegionCategory.Uncategorised => "Uncategorised",
-        RegionCategory.PlaceholderCategoryA => "Placeholder category A",
-        RegionCategory.PlaceholderCategoryB => "Placeholder category B",
-        RegionCategory.PlaceholderCategoryC => "Placeholder category C",
-        RegionCategory.PlaceholderCategoryD => "Placeholder category D",
+        RegionCategory.GeoStation => "Geo Station",
+        RegionCategory.Sealer => "Sealer",
+        RegionCategory.TipChanger => "Tip Changer",
+        RegionCategory.WeldStand => "Weld Stand",
         _ => category.ToString(),
     };
 
