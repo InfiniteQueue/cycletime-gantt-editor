@@ -31,6 +31,17 @@ therefore closes when a crosshair button is pressed, the host runs the pick, and
 on the same `OperationDraft` with the answer filled in. Anything half-typed has to survive that trip,
 which is why the draft holds the numeric fields as text.
 
+### The filter chips are whatever the bars are coloured by
+
+Picking a chip means "keep the work wearing this colour", so the set of chips is always
+`ChartView.EffectiveColorBy` - regions while the bars are coloured by region, robots while they are
+coloured by robot. The chart keeps a set for each (`RegionFilter`, `RobotFilter`) but only ever
+consults the one in use; **ask `Filtering` and `InFilter`, not either set's count.**
+
+Changing the colour source clears both, in `SetColorMode` and `SetGroupMode`, since what the user
+picked names something that is no longer on offer. The catch-all rows are not chips, for the same
+reason they are not items - there is nothing to select that would mean "the ones with none".
+
 ## Model rules
 
 - **Robots are named, not owned.** A robot exists while an operation names it. A `RobotInfo` record

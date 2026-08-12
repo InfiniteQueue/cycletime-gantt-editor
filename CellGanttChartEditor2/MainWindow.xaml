@@ -23,7 +23,7 @@
             <Setter Property="Margin" Value="8,0,5,0"/>
         </Style>
 
-        <!-- Region filter chip. The fill is the colour the region uses everywhere else. -->
+        <!-- Filter chip. The fill is the colour its region or robot uses everywhere else. -->
         <Style x:Key="FilterChip" TargetType="ToggleButton">
             <Setter Property="Margin" Value="0,0,6,4"/>
             <Setter Property="Foreground" Value="Black"/>
@@ -157,7 +157,8 @@
                                     Margin="8,0,0,0" Visibility="Collapsed" Click="SortByTime_Click"
                                     ToolTip="Re-order the rows by start time. Rows stay where you put them until you press this."/>
 
-                            <TextBlock Style="{StaticResource ToolLabel}" Text="Filter by region:"/>
+                            <TextBlock x:Name="FilterLabel" Style="{StaticResource ToolLabel}"
+                                       Text="Filter by region:"/>
                             <Button Content="Clear filter" Padding="8,2" Click="ClearFilter_Click"/>
                         </StackPanel>
 

@@ -190,8 +190,31 @@ public partial class ChartView : UserControl
 
     public ChartColorBy ColorMode { get; private set; } = ChartColorBy.Region;
 
-    /// <summary>Regions to keep. Empty means no filtering.</summary>
+    /// <summary>Regions to keep, used while the colouring is by region. Empty means no filtering.</summary>
     public HashSet<Guid> RegionFilter { get; } = new();
+
+    /// <summary>Robots to keep, used while the colouring is by robot. Empty means no filtering.</summary>
+    public HashSet<string> RobotFilter { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The filter follows whatever the bars are coloured by, so the chips the user picks from are
+    /// always the things the colours are telling them apart. The other set is left alone rather than
+    /// consulted - switching the colour source clears both, so only one is ever non-empty.
+    /// </summary>
+    public bool Filtering => EffectiveColorBy == ChartColorBy.Robot
+        ? RobotFilter.Count > 0
+        : RegionFilter.Count > 0;
+
+    private bool InFilter(Operation op) => EffectiveColorBy == ChartColorBy.Robot
+        ? op.HasRobot && RobotFilter.Contains(op.RobotName)
+        : RegionFilter.Contains(op.RegionId);
+
+    /// <summary>Drops every filter, whichever kind is in use.</summary>
+    public void ClearFilters()
+    {
+        RegionFilter.Clear();
+        RobotFilter.Clear();
+    }
 
     public bool ShowOverlaps { get; private set; } = true;
 
@@ -242,7 +265,7 @@ public partial class ChartView : UserControl
         Document = document;
         _selectedOperation = null;
         _selectedLink = null;
-        RegionFilter.Clear();
+        ClearFilters();
         _highlightedRegions.Clear();
         _zoom = 1;
         _scrollX = 0;
@@ -252,14 +275,29 @@ public partial class ChartView : UserControl
 
     public void SetGroupMode(ChartGroupMode mode)
     {
+        var was = EffectiveColorBy;
         GroupMode = mode;
+        DropFilterIfColorSourceChanged(was);
         Refresh();
     }
 
     public void SetColorMode(ChartColorBy mode)
     {
+        var was = EffectiveColorBy;
         ColorMode = mode;
+        DropFilterIfColorSourceChanged(was);
         Refresh();
+    }
+
+    /// <summary>
+    /// The chips are the things the bars are coloured by, so a change of colour source replaces the
+    /// whole set of them. Anything the user had picked names something no longer being offered, so
+    /// it goes rather than sitting invisibly on the chart.
+    /// </summary>
+    private void DropFilterIfColorSourceChanged(ChartColorBy was)
+    {
+        if (EffectiveColorBy != was)
+            ClearFilters();
     }
 
     public void SetShowOverlaps(bool show)
@@ -347,14 +385,14 @@ public partial class ChartView : UserControl
         if (Document == null)
             return;
 
-        var filtering = RegionFilter.Count > 0;
+        var filtering = Filtering;
         var primary = new HashSet<Guid>();
         var ghosted = new HashSet<Guid>();
 
         if (filtering)
         {
             foreach (var op in Document.Operations)
-                if (RegionFilter.Contains(op.RegionId))
+                if (InFilter(op))
                     primary.Add(op.Id);
 
             // Anything linked to a kept operation stays visible, but faded.
@@ -668,7 +706,7 @@ public partial class ChartView : UserControl
 
             foreach (var op in line.Row!.Operations)
                 DrawBar(dc, op, top, line.Height,
-                    line.Row.Ghosted.Contains(op.Id) && RegionFilter.Count > 0, X, cycle);
+                    line.Row.Ghosted.Contains(op.Id) && Filtering, X, cycle);
         }
 
         DrawLinks(dc, X, cycle);
@@ -1144,7 +1182,7 @@ public partial class ChartView : UserControl
             var head = selected ? Brushes.White : LinkBrush;
 
             // Fade the arrow to match when either end is only on screen because of the filter.
-            var dimmed = RegionFilter.Count > 0 &&
+            var dimmed = Filtering &&
                          ((sourceLine.Row?.Ghosted.Contains(source.Id) ?? false) ||
                           (targetLine.Row?.Ghosted.Contains(target.Id) ?? false));
             if (dimmed)
@@ -1680,7 +1718,7 @@ public partial class ChartView : UserControl
                 continue;
 
             // A bar the filter has hidden is not on screen to aim at.
-            if (RegionFilter.Count > 0 && !_rowOfOperation.ContainsKey(other.Id))
+            if (Filtering && !_rowOfOperation.ContainsKey(other.Id))
                 continue;
 
             // On a looping axis the end the user is aiming at may be a whole cycle away from the

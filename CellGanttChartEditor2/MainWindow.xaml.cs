@@ -108,9 +108,14 @@ public partial class MainWindow : Window
         _regionColors.Sync(_document.Regions.Select(r => r.ColorKey));
         _robotColors.Sync(_document.Robots());
 
-        // A region only goes when it is deleted outright, which takes its operations with it.
+        // A region only goes when it is deleted outright, which takes its operations with it. A
+        // robot can also lose its last operation and stop being offered, so both filters are pruned
+        // to what there are still chips for.
         var live = _document.Regions.Select(r => r.Id).ToHashSet();
         Chart.RegionFilter.RemoveWhere(id => !live.Contains(id));
+
+        var robots = new HashSet<string>(_document.Robots(), StringComparer.OrdinalIgnoreCase);
+        Chart.RobotFilter.RemoveWhere(name => !robots.Contains(name));
 
         ImageView.Regions = _document.Regions;
         ImageView.RobotMarkers = _document.PlacedRobots();
@@ -381,7 +386,8 @@ public partial class MainWindow : Window
         ColorByBox.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
         SortByTimeButton.Visibility = chronological ? Visibility.Visible : Visibility.Collapsed;
 
-        // Grouping decides the colour source, which the crosshairs follow.
+        // Grouping decides the colour source, which the crosshairs and the filter chips follow.
+        RebuildFilterChips();
         ImageView.InvalidateVisual();
     }
 
@@ -393,7 +399,9 @@ public partial class MainWindow : Window
             return;
 
         Chart.SetColorMode(option.Value);
-        // The crosshairs follow the chart's colour source, so they have to be redrawn with it.
+
+        // The crosshairs and the chips follow the chart's colour source, so both go with it.
+        RebuildFilterChips();
         ImageView.InvalidateVisual();
     }
 
@@ -537,56 +545,86 @@ public partial class MainWindow : Window
 
     // --------------------------------------------------------------- filter
 
+    /// <summary>
+    /// The chips are whatever the bars are being coloured by, so that picking one always means
+    /// "keep the things wearing this colour". Which of the two it is comes from the chart, since
+    /// grouping decides the colour source unless the view is chronological.
+    /// </summary>
     private void RebuildFilterChips()
     {
         _suppressChanges = true;
         FilterPanel.Children.Clear();
 
-        foreach (var region in _document.Regions)
+        var byRobot = Chart.EffectiveColorBy == ChartColorBy.Robot;
+        FilterLabel.Text = byRobot ? "Filter by robot:" : "Filter by region:";
+
+        if (byRobot)
+        {
+            foreach (var robot in _document.Robots())
+                AddChip(robot, _robotColors, robot, robot, Chart.RobotFilter.Contains(robot));
+
+            if (_document.Robots().Count == 0)
+                AddEmptyNote("No robots defined yet.");
+        }
+        else
+        {
+            foreach (var region in _document.Regions)
+                AddChip(region.Name, _regionColors, region.ColorKey, region.Id,
+                    Chart.RegionFilter.Contains(region.Id),
+                    $"{region.Name}  -  {RegionCategoryInfo.Display(region.Category)}");
+
+            if (_document.Regions.Count == 0)
+                AddEmptyNote("No regions defined yet.");
+        }
+
+        _suppressChanges = false;
+
+        void AddChip(string text, ColorAllocator colors, string colorKey, object tag, bool on,
+            string? tip = null)
         {
             var chip = new ToggleButton
             {
-                Content = region.Name,
+                Content = text,
                 Style = (Style)FindResource("FilterChip"),
-                Background = _regionColors.GetBrush(region.ColorKey),
-                Foreground = _regionColors.GetTextBrush(region.ColorKey),
-                Tag = region.Id,
-                IsChecked = Chart.RegionFilter.Contains(region.Id),
-                ToolTip = $"{region.Name}  -  {RegionCategoryInfo.Display(region.Category)}",
+                Background = colors.GetBrush(colorKey),
+                Foreground = colors.GetTextBrush(colorKey),
+                Tag = tag,
+                IsChecked = on,
+                ToolTip = tip ?? text,
             };
             chip.Checked += FilterChip_Changed;
             chip.Unchecked += FilterChip_Changed;
             FilterPanel.Children.Add(chip);
         }
 
-        if (_document.Regions.Count == 0)
+        void AddEmptyNote(string text) => FilterPanel.Children.Add(new TextBlock
         {
-            FilterPanel.Children.Add(new TextBlock
-            {
-                Text = "No regions defined yet.",
-                Foreground = Palette.Brush(Palette.Muted),
-            });
-        }
-
-        _suppressChanges = false;
+            Text = text,
+            Foreground = Palette.Brush(Palette.Muted),
+        });
     }
 
     private void FilterChip_Changed(object sender, RoutedEventArgs e)
     {
-        if (_suppressChanges || sender is not ToggleButton chip || chip.Tag is not Guid regionId)
+        if (_suppressChanges || sender is not ToggleButton chip)
             return;
 
-        if (chip.IsChecked == true)
-            Chart.RegionFilter.Add(regionId);
-        else
-            Chart.RegionFilter.Remove(regionId);
+        var on = chip.IsChecked == true;
+        switch (chip.Tag)
+        {
+            case Guid regionId when on: Chart.RegionFilter.Add(regionId); break;
+            case Guid regionId: Chart.RegionFilter.Remove(regionId); break;
+            case string robot when on: Chart.RobotFilter.Add(robot); break;
+            case string robot: Chart.RobotFilter.Remove(robot); break;
+            default: return;
+        }
 
         Chart.Refresh();
     }
 
     private void ClearFilter_Click(object sender, RoutedEventArgs e)
     {
-        Chart.RegionFilter.Clear();
+        Chart.ClearFilters();
         RebuildFilterChips();
         Chart.Refresh();
     }
