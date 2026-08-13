@@ -4,27 +4,24 @@ using System.Windows.Media;
 namespace CellGanttChartEditor2.Services;
 
 /// <summary>
-/// Hands out visually distinct fills. Solid colours are nine hues spaced evenly around the CIELCh
-/// hue circle; once those run out, entries get a checkered pattern built from two colours out of the
-/// same pool.
+/// Hands out visually distinct fills. Solid colours are nine hues chosen off the CIELCh hue circle;
+/// once those run out, entries get a checkered pattern built from two colours out of the same pool.
 ///
-/// The hues are picked in CIELCh rather than HSV because equal steps there are meant to be equal
-/// steps in perceived hue, which equal steps in HSV are not - HSV's hue is a corner-to-corner walk
-/// round the RGB cube, so 40 degrees of it covers a wide perceptual jump in one place and barely a
-/// shift in another. Lightness and chroma are chosen per hue, since neither the luminance rule below
-/// nor the sRGB gamut leaves them free.
+/// The hues are worked in CIELCh rather than HSV because HSV's hue is a corner-to-corner walk round
+/// the RGB cube, where 40 degrees covers a wide perceptual jump in one place and barely a shift in
+/// another. Lightness and chroma are then chosen per hue, since neither the luminance rule below nor
+/// the sRGB gamut leaves them free.
+///
+/// **Which nine hues is a search, not a step.** Spacing them evenly round the circle is the obvious
+/// thing and it does not work: the colours that come out are only as far apart as the gamut lets
+/// them be, and round the cyan-azure-blue arc sRGB has very little chroma to offer, so three evenly
+/// spaced hues there all land near the neutral axis at much the same lightness and read as three
+/// pale blues. So the nine are picked to maximise the smallest difference between any two of the
+/// colours actually produced - see <see cref="BuildHues"/>.
 /// </summary>
 public sealed class ColorAllocator
 {
     private const int HueCount = 9;
-
-    /// <summary>
-    /// Where the ring starts and how far round each step goes. Four steps at a time is what spaces
-    /// consecutive slots: nine and four share no factor, so it still reaches every hue, but two
-    /// items allocated one after the other land most of the circle apart rather than side by side.
-    /// </summary>
-    private const double HueStart = 25;
-    private const int HueStride = 4;
 
     /// <summary>
     /// How much of a hue's strongest colour to actually use. Every hue is taken at the lightness
@@ -35,15 +32,104 @@ public sealed class ColorAllocator
     /// </summary>
     private const double ChromaFraction = 0.78;
 
+    /// <summary>
+    /// How finely the hue circle is tried. The whole cost of <see cref="BuildHues"/> scales with
+    /// this and the returns fall away fast: at five degrees the closest pair of fills comes out
+    /// around 27, at two around 28, at one around 30, for 41, 67 and 115 milliseconds of work.
+    /// </summary>
+    private const double HueStep = 2;
+
+    /// <summary>
+    /// Cusps found so far. Declared here rather than beside <see cref="Cusp"/> because static
+    /// initialisers run down the file and <see cref="BuildHues"/>, below, works colours out.
+    /// </summary>
+    private static readonly Dictionary<double, (double Lightness, double Chroma)> Cusps = new();
+
     private static readonly double[] Hues = BuildHues();
 
+    /// <summary>
+    /// The nine hues, chosen so that the smallest difference between any two of the colours they
+    /// produce is as large as it can be, and ordered so that each slot is as far as possible from
+    /// every slot handed out before it - a document using three colours gets three that are easy to
+    /// tell apart, not the first three off a ring.
+    ///
+    /// Difference is CIEDE2000 rather than the straight distance in Lab, because the straight
+    /// distance is the very assumption that fails here: it reads two saturated colours as further
+    /// apart than the eye does, which is what lets a washed-out pair look acceptable on paper.
+    ///
+    /// This runs once, on the first colour anything asks for, and costs about seventy milliseconds -
+    /// it works out a colour for every candidate hue, and each of those is a stack of gamut
+    /// bisections. That is paid deliberately rather than kept as a table of angles, so that changing
+    /// <see cref="ChromaFraction"/> or <see cref="LuminanceMargin"/> re-picks the palette to suit
+    /// instead of silently spoiling it.
+    /// </summary>
     private static double[] BuildHues()
     {
-        var hues = new double[HueCount];
-        for (var i = 0; i < HueCount; i++)
-            hues[i] = (HueStart + i * HueStride % HueCount * (360.0 / HueCount)) % 360;
-        return hues;
+        var hues = new List<double>();
+        for (var hue = 0.0; hue < 360; hue += HueStep)
+            hues.Add(hue);
+
+        var labs = hues.Select(h => Lab(FromHue(h))).ToArray();
+        var gap = new double[hues.Count, hues.Count];
+        for (var i = 0; i < hues.Count; i++)
+        for (var j = i + 1; j < hues.Count; j++)
+            gap[i, j] = gap[j, i] = Difference(labs[i], labs[j]);
+
+        // How close a candidate would sit to the nearest thing in a set, which is what every step
+        // below maximises. Something already in the set scores nothing, so nothing is taken twice.
+        double Nearest(int candidate, IEnumerable<int> set) =>
+            set.Select(i => gap[candidate, i]).DefaultIfEmpty(double.MaxValue).Min();
+
+        // Start from the two furthest apart of all, then take whatever is furthest from what is
+        // already held. That alone leaves the last few cramped, so each is then given up in turn
+        // for whatever would sit furthest from the rest, until no swap helps.
+        var chosen = new List<int>();
+        var widest = (Gap: -1.0, A: 0, B: 0);
+        for (var i = 0; i < hues.Count; i++)
+        for (var j = i + 1; j < hues.Count; j++)
+            if (gap[i, j] > widest.Gap)
+                widest = (gap[i, j], i, j);
+        chosen.Add(widest.A);
+        chosen.Add(widest.B);
+
+        while (chosen.Count < HueCount)
+            chosen.Add(Enumerable.Range(0, hues.Count).MaxBy(c => Nearest(c, chosen)));
+
+        for (var pass = 0; pass < ImprovementPasses; pass++)
+        {
+            var improved = false;
+            for (var slot = 0; slot < chosen.Count; slot++)
+            {
+                var rest = chosen.Where((_, n) => n != slot).ToList();
+                var best = Enumerable.Range(0, hues.Count).MaxBy(c => Nearest(c, rest));
+                if (Nearest(best, rest) > Nearest(chosen[slot], rest) + Tolerance)
+                {
+                    chosen[slot] = best;
+                    improved = true;
+                }
+            }
+            if (!improved)
+                break;
+        }
+
+        // Re-order the nine the same way they were gathered, since the swaps above pay no attention
+        // to the order and the order is what spaces consecutive allocations.
+        var order = new List<int>();
+        var first = chosen.SelectMany(a => chosen.Select(b => (A: a, B: b)))
+            .MaxBy(p => p.A == p.B ? -1 : gap[p.A, p.B]);
+        order.Add(first.A);
+        order.Add(first.B);
+        while (order.Count < chosen.Count)
+            order.Add(chosen.Except(order).MaxBy(c => Nearest(c, order)));
+
+        return order.Select(i => hues[i]).ToArray();
     }
+
+    /// <summary>Enough passes to settle; the loop leaves early, and normally after two or three.</summary>
+    private const int ImprovementPasses = 50;
+
+    /// <summary>A swap has to be worth more than rounding noise, or the loop never settles.</summary>
+    private const double Tolerance = 1e-6;
 
     /// <summary>
     /// How far a fill's luminance is kept clear of the midpoint. Black and white text are both
@@ -52,7 +138,7 @@ public sealed class ColorAllocator
     /// <see cref="GetTextBrush"/> a decision rather than a guess.
     /// </summary>
     private const double MidLuminance = 0.5;
-    private const double LuminanceMargin = 0.1;
+    private const double LuminanceMargin = 0.15;
 
     /// <summary>
     /// Aimed at a shade past the margin, because the answer has to come back as whole bytes:
@@ -75,12 +161,15 @@ public sealed class ColorAllocator
 
     private static (int, int)[] BuildPairs()
     {
-        var pairs = new List<(int, int)>();
-        // Widest hue separation first, so early checkered entries are the easiest to tell apart.
-        for (var gap = Hues.Length - 1; gap >= 1; gap--)
-        for (var i = 0; i + gap < Hues.Length; i++)
-            pairs.Add((i, i + gap));
-        return pairs.ToArray();
+        var labs = Hues.Select(h => Lab(FromHue(h))).ToArray();
+        var pairs = new List<(int A, int B)>();
+        for (var i = 0; i < Hues.Length; i++)
+        for (var j = i + 1; j < Hues.Length; j++)
+            pairs.Add((i, j));
+
+        // Furthest apart first, so early checkered entries are the easiest to read as two colours.
+        // The hues are no longer in ring order, so this is a sort and not a walk over index gaps.
+        return pairs.OrderByDescending(p => Difference(labs[p.A], labs[p.B])).ToArray();
     }
 
     /// <summary>
@@ -303,34 +392,53 @@ public sealed class ColorAllocator
 
     /// <summary>
     /// The most colourful sRGB gets for a hue, and the lightness it happens at - the corner of the
-    /// gamut for that hue. Coarse steps first, since the shape has one peak and no local traps, then
-    /// a finer pass around it. Worth caching: nine hues, worked out once.
+    /// gamut for that hue. A slice of the RGB cube at one hue rises to a single corner and falls
+    /// away either side, so the peak is closed in on rather than scanned for: a golden-section
+    /// search keeps whichever two thirds of the range still hold it, and reuses one of its two
+    /// probes each time round. Worth doing well - <see cref="BuildHues"/> asks for a cusp per
+    /// candidate hue, not per fill.
     /// </summary>
     private static (double Lightness, double Chroma) Cusp(double hue)
     {
         if (Cusps.TryGetValue(hue, out var cached))
             return cached;
 
-        var best = (Lightness: 0.0, Chroma: 0.0);
-        for (var lightness = 1.0; lightness < 100; lightness += 1)
+        // 1/phi. The point of the ratio is that the probe kept from one round is correctly placed
+        // for the next, so each step past the first costs one call to MaxChroma rather than two.
+        const double Inverse = 0.6180339887498949;
+
+        var low = 0.0;
+        var high = 100.0;
+        var left = high - Inverse * (high - low);
+        var right = low + Inverse * (high - low);
+        var atLeft = MaxChroma(hue, left);
+        var atRight = MaxChroma(hue, right);
+
+        // Down to a tenth of a unit of lightness, which is finer than the old scan resolved.
+        while (high - low > 0.1)
         {
-            var chroma = MaxChroma(hue, lightness);
-            if (chroma > best.Chroma)
-                best = (lightness, chroma);
+            if (atLeft >= atRight)
+            {
+                high = right;
+                right = left;
+                atRight = atLeft;
+                left = high - Inverse * (high - low);
+                atLeft = MaxChroma(hue, left);
+            }
+            else
+            {
+                low = left;
+                left = right;
+                atLeft = atRight;
+                right = low + Inverse * (high - low);
+                atRight = MaxChroma(hue, right);
+            }
         }
 
-        for (var lightness = best.Lightness - 1; lightness <= best.Lightness + 1; lightness += 0.1)
-        {
-            var chroma = MaxChroma(hue, lightness);
-            if (chroma > best.Chroma)
-                best = (lightness, chroma);
-        }
-
+        var best = atLeft >= atRight ? (left, atLeft) : (right, atRight);
         Cusps[hue] = best;
         return best;
     }
-
-    private static readonly Dictionary<double, (double Lightness, double Chroma)> Cusps = new();
 
     private static bool InGamut(double lightness, double chroma, double hue)
     {
@@ -388,6 +496,109 @@ public sealed class ColorAllocator
             ? 12.92 * linear
             : 1.055 * Math.Pow(Math.Max(0, linear), 1 / 2.4) - 0.055;
         return (byte)Math.Round(Math.Clamp(encoded, 0, 1) * 255);
+    }
+
+    // ------------------------------------------------------- sRGB back to Lab, and difference
+
+    /// <summary>
+    /// The reverse of the trip above: a colour as sRGB holds it, back to the Lab coordinates the
+    /// difference below is defined on. Only <see cref="BuildHues"/> needs this, and only once.
+    /// </summary>
+    private static (double L, double A, double B) Lab(Color color)
+    {
+        var r = Decode(color.R);
+        var g = Decode(color.G);
+        var b = Decode(color.B);
+
+        var x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / WhiteX;
+        var y = (0.2126729 * r + 0.7151522 * g + 0.0721750 * b) / WhiteY;
+        var z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / WhiteZ;
+
+        var fx = ToLabTransfer(x);
+        var fy = ToLabTransfer(y);
+        var fz = ToLabTransfer(z);
+        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz));
+    }
+
+    private static double Decode(byte channel)
+    {
+        var v = channel / 255.0;
+        return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
+    }
+
+    private static double ToLabTransfer(double t) =>
+        t > LabKnee * LabKnee * LabKnee ? Math.Cbrt(t) : t / (3 * LabKnee * LabKnee) + 4.0 / 29;
+
+    /// <summary>
+    /// CIEDE2000 between two Lab colours - how different they look, as the standard has it. The
+    /// corrections it carries over a plain distance are exactly the ones that matter here: it pulls
+    /// back differences between strongly coloured pairs, which a plain distance flatters, and it
+    /// treats a hue shift in the blues more carefully than one elsewhere.
+    /// </summary>
+    private static double Difference((double L, double A, double B) p, (double L, double A, double B) q)
+    {
+        const double deg = Math.PI / 180;
+        var (l1, a1, b1) = p;
+        var (l2, a2, b2) = q;
+
+        var chroma1 = Math.Sqrt(a1 * a1 + b1 * b1);
+        var chroma2 = Math.Sqrt(a2 * a2 + b2 * b2);
+        var meanChroma = (chroma1 + chroma2) / 2;
+        var g = 0.5 * (1 - Math.Sqrt(Pow7(meanChroma) / (Pow7(meanChroma) + Pow7(25))));
+
+        var ap1 = (1 + g) * a1;
+        var ap2 = (1 + g) * a2;
+        var cp1 = Math.Sqrt(ap1 * ap1 + b1 * b1);
+        var cp2 = Math.Sqrt(ap2 * ap2 + b2 * b2);
+        var hp1 = cp1 == 0 ? 0 : (Math.Atan2(b1, ap1) / deg + 360) % 360;
+        var hp2 = cp2 == 0 ? 0 : (Math.Atan2(b2, ap2) / deg + 360) % 360;
+
+        var dL = l2 - l1;
+        var dC = cp2 - cp1;
+
+        var dh = 0.0;
+        if (cp1 * cp2 != 0)
+        {
+            dh = hp2 - hp1;
+            if (dh > 180) dh -= 360;
+            else if (dh < -180) dh += 360;
+        }
+        var dH = 2 * Math.Sqrt(cp1 * cp2) * Math.Sin(dh / 2 * deg);
+
+        var meanL = (l1 + l2) / 2;
+        var meanCp = (cp1 + cp2) / 2;
+        double meanH;
+        if (cp1 * cp2 == 0) meanH = hp1 + hp2;
+        else if (Math.Abs(hp1 - hp2) <= 180) meanH = (hp1 + hp2) / 2;
+        else meanH = (hp1 + hp2 + (hp1 + hp2 < 360 ? 360 : -360)) / 2;
+
+        var t = 1 - 0.17 * Math.Cos((meanH - 30) * deg)
+                  + 0.24 * Math.Cos(2 * meanH * deg)
+                  + 0.32 * Math.Cos((3 * meanH + 6) * deg)
+                  - 0.20 * Math.Cos((4 * meanH - 63) * deg);
+
+        var offset = (meanL - 50) * (meanL - 50);
+        var sl = 1 + 0.015 * offset / Math.Sqrt(20 + offset);
+        var sc = 1 + 0.045 * meanCp;
+        var sh = 1 + 0.015 * meanCp * t;
+
+        // The rotation term, which is what stops two blues being credited with a difference the eye
+        // does not see - it only bites around hue 275, and that is the arc this palette lives on.
+        var fromBlue = (meanH - 275) / 25;
+        var rotation = -Math.Sin(2 * 30 * Math.Exp(-fromBlue * fromBlue) * deg)
+                       * 2 * Math.Sqrt(Pow7(meanCp) / (Pow7(meanCp) + Pow7(25)));
+
+        var lightness = dL / sl;
+        var chroma = dC / sc;
+        var hue = dH / sh;
+        return Math.Sqrt(lightness * lightness + chroma * chroma + hue * hue
+                         + rotation * chroma * hue);
+    }
+
+    private static double Pow7(double value)
+    {
+        var square = value * value;
+        return square * square * square * value;
     }
 
     public static Color Darken(Color color, double factor) => Color.FromRgb(

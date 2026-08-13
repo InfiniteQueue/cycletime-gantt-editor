@@ -3,6 +3,16 @@
 A WPF (.NET 9) editor for robot cell cycle charts: a reference image with regions marked on it, and
 a looping Gantt chart of the operations carried out in them.
 
+## Testing is the user's to run
+
+**Do not run the test suites, and do not run the app to try something out. Ask.** Say what should be
+run and what the result would tell us, then wait for the answer. Compiling to check the code builds
+is not a test and does not need asking about.
+
+The consequence for how work is reported: **nothing is "verified" on your own say-so.** Describe what
+was changed and what it is expected to do, and leave the claim that it works to the run the user
+did. If a change rests on a result that has not come back yet, say so rather than assuming it passed.
+
 ## UI conventions
 
 ### The crosshair means "point at something on the image"
@@ -113,10 +123,18 @@ their own hit testing - there are no WPF elements per bar, row or region. Two co
   it comes out on the WM_SIZE path where nothing catches it and the app dies.
 - Colours live in `Services/Palette.cs` for the drawn surfaces and `Themes/Dark.xaml` for the XAML
   controls. Keep the two in step.
-- **Fills come from `ColorAllocator`, which picks them in CIELCh** - nine hues spaced evenly round
-  that circle, each taken at the lightness where sRGB lets it be most colourful, then moved clear of
-  half luminance. Equal steps in CIELCh are meant to be equal steps in *perceived* hue; equal steps
-  in HSV are not, so do not reach for HSV here.
+- **Fills come from `ColorAllocator`, which works in CIELCh** - nine hues, each taken at the
+  lightness where sRGB lets it be most colourful, then moved clear of half luminance. Do not reach
+  for HSV here: its hue is a walk round the corners of the RGB cube, so equal steps of it are not
+  equal steps of anything.
+- **Which nine hues is a search, and evenly spacing them is the wrong answer.** It was the original
+  rule and it produced three near-identical pale blues, because a colour is only as far from its
+  neighbour as the gamut allows and sRGB has very little chroma to give round the cyan-azure-blue
+  arc. `BuildHues` instead picks the nine that maximise the smallest CIEDE2000 difference between
+  any two, and orders them so each slot is as far as it can be from every slot handed out before it.
+  It runs once, from the constants, so **changing `ChromaFraction` or `LuminanceMargin` re-picks the
+  palette rather than quietly spoiling it** - which is the point of not keeping a table of angles.
+  Judge a change here by the worst pair, never by the average or by the hue spacing.
 - **Text on a coloured surface asks `ColorAllocator` which of black and white to use** -
   `GetTextBrush` for an allocated fill, `TextOn` for any other colour. One rule decides it for the
   filter chips and the bars alike. A bar is not all one colour, though: a clash paints part of it
