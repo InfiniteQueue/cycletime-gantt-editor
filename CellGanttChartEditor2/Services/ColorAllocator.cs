@@ -5,7 +5,8 @@ namespace CellGanttChartEditor2.Services;
 
 /// <summary>
 /// Hands out visually distinct fills. Solid colours are nine hues chosen off the CIELCh hue circle;
-/// once those run out, entries get a checkered pattern built from two colours out of the same pool.
+/// once those run out, entries get a checkered pattern of a primary out of those nine and one of
+/// eight secondaries picked for it, which is seventy-two more fills.
 ///
 /// The hues are worked in CIELCh rather than HSV because HSV's hue is a corner-to-corner walk round
 /// the RGB cube, where 40 degrees covers a wide perceptual jump in one place and barely a shift in
@@ -147,7 +148,26 @@ public sealed class ColorAllocator
     /// </summary>
     private const double RoundingAllowance = 0.5 / 255;
 
-    private static readonly (int A, int B)[] CheckerPairs = BuildPairs();
+    /// <summary>How far from half luminance a colour has to be, allowance included.</summary>
+    private const double Margin = LuminanceMargin + RoundingAllowance;
+
+    /// <summary>
+    /// How many secondaries each of the nine primaries is given, and so how many checkered fills
+    /// there are before they start round again: nine times this.
+    /// </summary>
+    private const int SecondaryCount = 8;
+
+    /// <summary>
+    /// The grid a secondary is chosen off. Hues step by a multiple of <see cref="HueStep"/> so the
+    /// cusps are the ones <see cref="BuildHues"/> has already worked out and cached; the luminance
+    /// levels run from the near edge of the allowed band out towards black or white, stopping short
+    /// of either, since the last stretch is all but colourless and would only offer near-duplicates.
+    /// </summary>
+    private const double SecondaryHueStep = 12;
+    private const int LuminanceLevels = 4;
+    private const double LuminanceLimit = 0.08;
+
+    private static readonly (Color Primary, Color Secondary)[] CheckerPairs = BuildPairs();
 
     /// <summary>Checker tile size for fills, and a smaller one so the pattern still reads in a border.</summary>
     private const double FillTile = 14;
@@ -159,18 +179,211 @@ public sealed class ColorAllocator
 
     public static int SolidCount => Hues.Length;
 
-    private static (int, int)[] BuildPairs()
+    /// <summary>
+    /// Every checkered fill, worked out up front and ordered so the pairs whose two colours are
+    /// furthest apart are handed out first.
+    ///
+    /// A secondary is no longer one of the nine solids bent to fit. Taking a hue and dragging it to
+    /// the primary's exact luminance is what used to spoil these: reaching the luminance of a lime
+    /// green costs a purple almost all its chroma, so lime's purple, orange and pink all arrived as
+    /// much the same pale wash. A secondary is instead chosen freely off the grid above, holding
+    /// only to what the pairing actually needs - that it sit the same side of half luminance as its
+    /// primary, so one colour of text is right across the whole pattern and no tile glares beside
+    /// its neighbour. That is a weaker rule than matching luminance outright, not a stronger one, so
+    /// nothing that could be paired before is lost.
+    ///
+    /// The eight are chosen the way the hues are: maximise the smallest difference within the set,
+    /// counting the primary as a member of it, so each secondary stands apart from the other seven
+    /// and from the colour it will be laid against.
+    ///
+    /// **A fill is an unordered pair.** The tile is half one colour and half the other, so swapping
+    /// them draws the same board shifted half a step - not a similar fill, the same one. Picking the
+    /// eight a primary at a time cannot see that, since it never compares one primary's pairings with
+    /// another's, and nothing stops a secondary landing on some other primary's colour. So the whole
+    /// set is gone over afterwards by <see cref="Separate"/>, measuring one fill against another the
+    /// way the eye takes them: as two colours in no particular order.
+    /// </summary>
+    private static (Color Primary, Color Secondary)[] BuildPairs()
     {
-        var labs = Hues.Select(h => Lab(FromHue(h))).ToArray();
-        var pairs = new List<(int A, int B)>();
-        for (var i = 0; i < Hues.Length; i++)
-        for (var j = i + 1; j < Hues.Length; j++)
-            pairs.Add((i, j));
+        var table = BuildTable();
 
-        // Furthest apart first, so early checkered entries are the easiest to read as two colours.
-        // The hues are no longer in ring order, so this is a sort and not a walk over index gaps.
-        return pairs.OrderByDescending(p => Difference(labs[p.A], labs[p.B])).ToArray();
+        // Which colours each primary may draw a secondary from: the ones on its own side of half
+        // luminance. The primaries themselves are in the table too, so they are candidates - the
+        // separation below is what stops that turning into two fills that are the same pair twice.
+        var pools = new List<int>[HueCount];
+        var fills = new List<(int Primary, int Secondary)>();
+        for (var primary = 0; primary < HueCount; primary++)
+        {
+            pools[primary] = Enumerable.Range(HueCount, table.Colors.Length - HueCount)
+                .Where(i => table.Above[i] == table.Above[primary]).ToList();
+            foreach (var secondary in Choose(SecondaryCount, pools[primary], primary, table))
+                fills.Add((primary, secondary));
+        }
+
+        var separated = fills.ToArray();
+        Separate(separated, pools, table);
+
+        return separated
+            .OrderByDescending(f => table.Gap[f.Primary, f.Secondary])
+            .Select(f => (table.Colors[f.Primary], table.Colors[f.Secondary]))
+            .ToArray();
     }
+
+    /// <summary>
+    /// Every colour a checkered fill can be built from, with the difference between each two of them
+    /// worked out once. The nine primaries come first, so an index below <see cref="HueCount"/> is
+    /// one of them; the rest is the grid a secondary is chosen off, both sides of half luminance in
+    /// the one table so that a fill on one side can still be measured against a fill on the other.
+    /// </summary>
+    private sealed record Table(Color[] Colors, bool[] Above, double[,] Gap);
+
+    private static Table BuildTable()
+    {
+        var colors = new List<Color>();
+        var above = new List<bool>();
+
+        foreach (var hue in Hues)
+        {
+            var primary = FromHue(hue);
+            colors.Add(primary);
+            above.Add(Luminance(primary) > MidLuminance);
+        }
+
+        foreach (var up in new[] { true, false })
+        {
+            var near = up ? MidLuminance + Margin : MidLuminance - Margin;
+            var far = up ? 1 - LuminanceLimit : LuminanceLimit;
+
+            for (var hue = 0.0; hue < 360; hue += SecondaryHueStep)
+            for (var level = 0; level < LuminanceLevels; level++)
+            {
+                colors.Add(AtLuminance(hue, near + (far - near) * level / (LuminanceLevels - 1.0)));
+                above.Add(up);
+            }
+        }
+
+        var labs = colors.Select(Lab).ToArray();
+        var gap = new double[labs.Length, labs.Length];
+        for (var i = 0; i < labs.Length; i++)
+        for (var j = i + 1; j < labs.Length; j++)
+            gap[i, j] = gap[j, i] = Difference(labs[i], labs[j]);
+
+        return new Table(colors.ToArray(), above.ToArray(), gap);
+    }
+
+    /// <summary>
+    /// Takes <paramref name="count"/> colours out of <paramref name="pool"/>, keeping them as far
+    /// from each other and from <paramref name="seed"/> as they can be got. Same two steps as the
+    /// hues: take what is furthest from everything held so far, then give each up for anything
+    /// better. Returns them furthest from the seed first.
+    /// </summary>
+    private static List<int> Choose(int count, List<int> pool, int seed, Table table)
+    {
+        // Anything already held is at no distance from itself, so nothing is taken twice.
+        double Nearest(int candidate, IEnumerable<int> set) => Math.Min(table.Gap[candidate, seed],
+            set.Select(i => table.Gap[candidate, i]).DefaultIfEmpty(double.MaxValue).Min());
+
+        var chosen = new List<int>();
+        while (chosen.Count < count)
+            chosen.Add(pool.MaxBy(c => Nearest(c, chosen)));
+
+        for (var pass = 0; pass < ImprovementPasses; pass++)
+        {
+            var improved = false;
+            for (var slot = 0; slot < chosen.Count; slot++)
+            {
+                var rest = chosen.Where((_, n) => n != slot).ToList();
+                var best = pool.MaxBy(c => Nearest(c, rest));
+                if (Nearest(best, rest) > Nearest(chosen[slot], rest) + Tolerance)
+                {
+                    chosen[slot] = best;
+                    improved = true;
+                }
+            }
+            if (!improved)
+                break;
+        }
+
+        return chosen.OrderByDescending(c => table.Gap[c, seed]).ToList();
+    }
+
+    /// <summary>
+    /// How unlike one fill is to another, taking each as the two colours it is made of and nothing
+    /// more. The pair can be lined up two ways round and the eye is free to take either, so the
+    /// answer is the closer of the two - which reads a swapped pair as no difference at all, and
+    /// makes a near-swap nearly none.
+    /// </summary>
+    private static double Apart((int Primary, int Secondary) a, (int Primary, int Secondary) b, Table table) =>
+        Math.Min(
+            Math.Max(table.Gap[a.Primary, b.Primary], table.Gap[a.Secondary, b.Secondary]),
+            Math.Max(table.Gap[a.Primary, b.Secondary], table.Gap[a.Secondary, b.Primary]));
+
+    /// <summary>
+    /// Pulls the closest two fills apart, over and over, until nothing can be bettered. Each round
+    /// finds the two least unlike each other and tries to re-cut one of them from its own primary's
+    /// pool, taking the first cut that clears the figure those two are stuck at.
+    ///
+    /// What is asked of a re-cut is that **every** pairing the re-cut fill is now part of clears that
+    /// figure - not that the whole set's worst improves. Those come apart when two pairs are stuck at
+    /// the same figure, which is exactly the case this exists for: two swapped duplicates both sit at
+    /// no difference at all, and mending one would leave the set's worst still at nothing and see the
+    /// mend refused. Asking only about the fill being re-cut takes the pairs one at a time, and since
+    /// no cut is allowed to introduce anything as close as the figure it cleared, the set cannot go
+    /// backwards and the loop must settle.
+    ///
+    /// A replacement also has to stand apart from the primary it goes under, or a fill would stop
+    /// reading as two colours - which is the one thing the measure above cannot see, since it
+    /// compares fills with each other and never looks inside one.
+    /// </summary>
+    private static void Separate((int Primary, int Secondary)[] fills, List<int>[] pools, Table table)
+    {
+        var apart = new double[fills.Length, fills.Length];
+        for (var i = 0; i < fills.Length; i++)
+        for (var j = i + 1; j < fills.Length; j++)
+            apart[i, j] = apart[j, i] = Apart(fills[i], fills[j], table);
+
+        for (var round = 0; round < SeparationRounds; round++)
+        {
+            var worst = (Apart: double.MaxValue, A: 0, B: 0);
+            for (var i = 0; i < fills.Length; i++)
+            for (var j = i + 1; j < fills.Length; j++)
+                if (apart[i, j] < worst.Apart)
+                    worst = (apart[i, j], i, j);
+
+            if (!Recut(worst.A, worst.Apart) && !Recut(worst.B, worst.Apart))
+                break;
+        }
+
+        // Tries to re-cut one fill so that nothing it is part of sits as close as floor any more.
+        bool Recut(int fill, double floor)
+        {
+            foreach (var candidate in pools[fills[fill].Primary])
+            {
+                if (candidate == fills[fill].Secondary)
+                    continue;
+
+                // Starting from the distance to its own primary keeps a fill reading as two colours.
+                var trial = (fills[fill].Primary, candidate);
+                var lowest = table.Gap[trial.Primary, candidate];
+                for (var other = 0; other < fills.Length && lowest > floor + Tolerance; other++)
+                    if (other != fill)
+                        lowest = Math.Min(lowest, Apart(trial, fills[other], table));
+
+                if (lowest <= floor + Tolerance)
+                    continue;
+
+                fills[fill] = trial;
+                for (var other = 0; other < fills.Length; other++)
+                    if (other != fill)
+                        apart[fill, other] = apart[other, fill] = Apart(trial, fills[other], table);
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>Enough rounds to settle. The loop leaves as soon as neither fill can be bettered.</summary>
+    private const int SeparationRounds = 500;
 
     /// <summary>
     /// Assigns slots to <paramref name="keys"/> (in order) and releases slots for anything absent,
@@ -230,9 +443,9 @@ public sealed class ColorAllocator
     public Color GetSecondaryColor(string key) => ColorsForSlot(Slot(key)).Secondary;
 
     /// <summary>
-    /// The one or two colours a slot is drawn in. A checkered slot's second hue is taken to the
-    /// first one's luminance, so the pattern reads as one brightness in two hues rather than a
-    /// bright tile beside a dark one - and text laid over it is the same choice on either tile.
+    /// The one or two colours a slot is drawn in. Both colours of a checkered slot sit the same side
+    /// of half luminance, so no tile glares beside its neighbour and text laid over the pattern is
+    /// the same choice on either of them.
     /// </summary>
     private static (Color Primary, Color Secondary) ColorsForSlot(int slot)
     {
@@ -250,8 +463,7 @@ public sealed class ColorAllocator
         else
         {
             var pair = CheckerPairs[(slot - Hues.Length) % CheckerPairs.Length];
-            var primary = FromHue(Hues[pair.A]);
-            colors = (primary, AtLuminance(Hues[pair.B], Luminance(primary)));
+            colors = (pair.Primary, pair.Secondary);
         }
 
         SlotColors[slot] = colors;
@@ -328,10 +540,9 @@ public sealed class ColorAllocator
     /// <summary>Pushes a luminance clear of the band either side of the midpoint, the shorter way.</summary>
     private static double Clear(double luminance)
     {
-        var margin = LuminanceMargin + RoundingAllowance;
-        if (Math.Abs(luminance - MidLuminance) >= margin)
+        if (Math.Abs(luminance - MidLuminance) >= Margin)
             return luminance;
-        return luminance < MidLuminance ? MidLuminance - margin : MidLuminance + margin;
+        return luminance < MidLuminance ? MidLuminance - Margin : MidLuminance + Margin;
     }
 
     /// <summary>
