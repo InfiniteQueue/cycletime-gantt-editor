@@ -54,6 +54,8 @@ public partial class BarEditDialog : Window
         StartBox.Text = draft.Start;
         DurationBox.Text = draft.Duration;
         NotesBox.Text = draft.Notes;
+        CategoryBox.ItemsSource = OperationCategoryInfo.Options;
+        CategoryBox.SelectedItem = OperationCategoryInfo.Options.First(o => o.Value == draft.Category);
 
         ShowSimultaneous();
 
@@ -202,6 +204,9 @@ public partial class BarEditDialog : Window
         Draft.OperationName = OperationBox.Text;
         Draft.Start = StartBox.Text;
         Draft.Duration = DurationBox.Text;
+        Draft.Notes = NotesBox.Text;
+        Draft.Category = (CategoryBox.SelectedItem as OperationCategoryOption)?.Value
+                         ?? OperationCategory.Uncategorised;
     }
 
     private void NotesBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -236,6 +241,8 @@ public sealed class BarEditDraft
 
     public string? Notes { get; set; } = string.Empty;
 
+    public OperationCategory Category { get; set; } = OperationCategory.Uncategorised;
+
     public static BarEditDraft From(Operation op)
     {
         var draft = new BarEditDraft
@@ -243,7 +250,8 @@ public sealed class BarEditDraft
             OperationName = op.Name,
             Start = TimeMath.Format(op.Start),
             Duration = TimeMath.Format(op.Duration),
-            Notes = op.Notes
+            Notes = op.Notes,
+            Category = op.Category,
         };
         draft.Simultaneous.AddRange(op.SimultaneousWith);
         return draft;

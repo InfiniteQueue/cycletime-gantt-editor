@@ -298,6 +298,22 @@ public partial class ItemListView : UserControl
             RaiseEdited();
         };
 
+        // The operation's own category, chosen from the fixed set the enum declares.
+        var categoryBox = Field(details, "Category", new ComboBox
+        {
+            ItemsSource = OperationCategoryInfo.Options,
+            SelectedItem = OperationCategoryInfo.Options.FirstOrDefault(o => o.Value == op.Category),
+            DisplayMemberPath = "Text",
+        });
+        categoryBox.SelectionChanged += (_, _) =>
+        {
+            if (_building || categoryBox.SelectedItem is not OperationCategoryOption option ||
+                option.Value == op.Category)
+                return;
+            op.Category = option.Value;
+            RaiseEdited();
+        };
+
         var start = Field(details, "Start time", new TextBox { Text = TimeMath.Format(op.Start) });
         var duration = Field(details, "Duration", new TextBox { Text = TimeMath.Format(op.Duration) });
 

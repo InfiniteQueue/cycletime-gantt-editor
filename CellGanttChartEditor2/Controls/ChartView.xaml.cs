@@ -194,6 +194,8 @@ public partial class ChartView : UserControl
 
     public ColorAllocator RobotColors { get; set; } = new();
 
+    public ColorAllocator CategoryColors { get; set; } = new();
+
     public ChartGroupMode GroupMode { get; private set; } = ChartGroupMode.Region;
 
     public ChartColorBy ColorMode { get; private set; } = ChartColorBy.Region;
@@ -204,18 +206,27 @@ public partial class ChartView : UserControl
     /// <summary>Robots to keep, used while the colouring is by robot. Empty means no filtering.</summary>
     public HashSet<string> RobotFilter { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Categories to keep, used while the colouring is by category.</summary>
+    public HashSet<OperationCategory> CategoryFilter { get; } = new();
+
     /// <summary>
     /// The filter follows whatever the bars are coloured by, so the chips the user picks from are
     /// always the things the colours are telling them apart. The other set is left alone rather than
     /// consulted - switching the colour source clears both, so only one is ever non-empty.
     /// </summary>
-    public bool Filtering => EffectiveColorBy == ChartColorBy.Robot
-        ? RobotFilter.Count > 0
-        : RegionFilter.Count > 0;
+    public bool Filtering => EffectiveColorBy switch
+    {
+        ChartColorBy.Category => CategoryFilter.Count > 0,
+        ChartColorBy.Robot => RobotFilter.Count > 0,
+        _ => RegionFilter.Count > 0,
+    };
 
-    private bool InFilter(Operation op) => EffectiveColorBy == ChartColorBy.Robot
-        ? op.HasRobot && RobotFilter.Contains(op.RobotName)
-        : RegionFilter.Contains(op.RegionId);
+    private bool InFilter(Operation op) => EffectiveColorBy switch
+    {
+        ChartColorBy.Category => CategoryFilter.Contains(op.Category),
+        ChartColorBy.Robot => op.HasRobot && RobotFilter.Contains(op.RobotName),
+        _ => RegionFilter.Contains(op.RegionId),
+    };
 
     /// <summary>True while the chart is waiting for the user to click an operation.</summary>
     public bool IsPickingBar => _barPick != null;
@@ -255,6 +266,7 @@ public partial class ChartView : UserControl
     {
         RegionFilter.Clear();
         RobotFilter.Clear();
+        CategoryFilter.Clear();
     }
 
     public bool ShowOverlaps { get; private set; } = true;
@@ -662,19 +674,27 @@ public partial class ChartView : UserControl
     /// against - no region, or no robot - and then it takes the neutral fill rather than borrowing
     /// some other item's colour.
     /// </summary>
-    private Brush FillOf(Operation op) =>
-        EffectiveColorBy == ChartColorBy.Robot
-            ? op.HasRobot ? RobotColors.GetBrush(op.RobotName) : UnassignedBrush
-            : Document?.RegionOf(op) is { } region ? RegionColors.GetBrush(region.ColorKey) : UnassignedBrush;
+    private Brush FillOf(Operation op) => EffectiveColorBy switch
+    {
+        // Every operation has a category, so this branch never falls back to the neutral fill.
+        ChartColorBy.Category => CategoryColors.GetBrush(op.CategoryColorKey),
+        ChartColorBy.Robot => op.HasRobot ? RobotColors.GetBrush(op.RobotName) : UnassignedBrush,
+        _ => Document?.RegionOf(op) is { } region
+            ? RegionColors.GetBrush(region.ColorKey)
+            : UnassignedBrush,
+    };
 
     private string LabelOf(Operation op)
     {
         if (GroupMode != ChartGroupMode.Chronological)
             return op.Name;
 
-        var other = EffectiveColorBy == ChartColorBy.Robot
-            ? Document?.RegionOf(op)?.Name ?? "(no region)"
-            : op.HasRobot ? op.RobotName : "(no robot)";
+        var other = EffectiveColorBy switch
+        {
+            ChartColorBy.Category => OperationCategoryInfo.Display(op.Category),
+            ChartColorBy.Robot => Document?.RegionOf(op)?.Name ?? "(no region)",
+            _ => op.HasRobot ? op.RobotName : "(no robot)",
+        };
         return $"{op.Name} - {other}";
     }
 
@@ -1195,15 +1215,14 @@ public partial class ChartView : UserControl
     }
 
     /// <summary>Black or white for a bar's label, from the fill the bar is actually drawn in.</summary>
-    private Brush TextOn(Operation op)
+    private Brush TextOn(Operation op) => EffectiveColorBy switch
     {
-        if (EffectiveColorBy == ChartColorBy.Robot)
-            return op.HasRobot ? RobotColors.GetTextBrush(op.RobotName) : UnassignedTextBrush;
-
-        return Document?.RegionOf(op) is { } region
+        ChartColorBy.Category => CategoryColors.GetTextBrush(op.CategoryColorKey),
+        ChartColorBy.Robot => op.HasRobot ? RobotColors.GetTextBrush(op.RobotName) : UnassignedTextBrush,
+        _ => Document?.RegionOf(op) is { } region
             ? RegionColors.GetTextBrush(region.ColorKey)
-            : UnassignedTextBrush;
-    }
+            : UnassignedTextBrush,
+    };
 
     private void DrawLinks(DrawingContext dc, Func<double, double> x, double cycle)
     {
@@ -1977,6 +1996,7 @@ public partial class ChartView : UserControl
 
             bar.Name = dialog.OperationName;
             bar.Notes = dialog.Notes;
+            bar.Category = draft.Category;
             Document.SetSimultaneous(bar, draft.Simultaneous);
             Document.EditTiming(bar, dialog.Start, dialog.Duration);
             RaiseEdited();

@@ -33,7 +33,11 @@ public sealed class OperationDraft
 
     public string NewRegionName { get; set; } = string.Empty;
 
+    /// <summary>The new region's category, if one is being defined.</summary>
     public RegionCategory Category { get; set; } = RegionCategory.Uncategorised;
+
+    /// <summary>What kind of work the operation itself is. Nothing to do with the region's.</summary>
+    public OperationCategory OperationCategory { get; set; } = OperationCategory.Uncategorised;
 
     public string RobotName { get; set; } = string.Empty;
 

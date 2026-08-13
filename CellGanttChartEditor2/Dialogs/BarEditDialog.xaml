@@ -33,6 +33,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- The name is editable here: double-clicking a bar is the gesture for renaming an
@@ -46,16 +47,22 @@
             <TextBlock Grid.Row="2" Grid.Column="0" Text="Region"/>
             <TextBlock Grid.Row="2" Grid.Column="1" x:Name="RegionText"/>
 
-            <Separator Grid.Row="3" Grid.ColumnSpan="2" Margin="0,8"/>
+            <!-- The category is the operation's own, so unlike the robot and the region above it is
+                 editable here. -->
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Category"/>
+            <ComboBox  Grid.Row="3" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text"
+                       Margin="0,3"/>
 
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="Start time"/>
-            <TextBox   Grid.Row="4" Grid.Column="1" x:Name="StartBox"/>
+            <Separator Grid.Row="4" Grid.ColumnSpan="2" Margin="0,8"/>
 
-            <TextBlock Grid.Row="5" Grid.Column="0" Text="Duration"/>
-            <TextBox   Grid.Row="5" Grid.Column="1" x:Name="DurationBox"/>
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Start time"/>
+            <TextBox   Grid.Row="5" Grid.Column="1" x:Name="StartBox"/>
 
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="Notes"/>
-            <ScrollViewer Grid.Row="6" Grid.Column="1" MaxHeight="85" Height="auto" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Duration"/>
+            <TextBox   Grid.Row="6" Grid.Column="1" x:Name="DurationBox"/>
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Notes"/>
+            <ScrollViewer Grid.Row="7" Grid.Column="1" MaxHeight="85" Height="auto" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <TextBox Grid.Column="1" x:Name="NotesBox" TextWrapping="Wrap" KeyDown="NotesBox_KeyDown" MinHeight="35" VerticalContentAlignment="Center"/>
             </ScrollViewer>
         </Grid>

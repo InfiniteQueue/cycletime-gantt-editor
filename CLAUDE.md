@@ -43,8 +43,9 @@ to the chart says so in words.
 
 Picking a chip means "keep the work wearing this colour", so the set of chips is always
 `ChartView.EffectiveColorBy` - regions while the bars are coloured by region, robots while they are
-coloured by robot. The chart keeps a set for each (`RegionFilter`, `RobotFilter`) but only ever
-consults the one in use; **ask `Filtering` and `InFilter`, not either set's count.**
+coloured by robot, categories while they are coloured by category. The chart keeps a set for each
+(`RegionFilter`, `RobotFilter`, `CategoryFilter`) but only ever consults the one in use; **ask
+`Filtering` and `InFilter`, not any set's count.**
 
 Changing the colour source clears both, in `SetColorMode` and `SetGroupMode`, since what the user
 picked names something that is no longer on offer. The catch-all rows are not chips, for the same
@@ -64,6 +65,14 @@ reason they are not items - there is nothing to select that would mean "the ones
   it. Only the name and the timing are required.
 - **A region need not have an area.** `ChartRegion.Bounds` may be empty - test with
   `ChartRegion.HasArea`. Such a region is not drawn on the image but is a region in every other way.
+- **Every operation has a category; nothing else about it is optional in that way.** Regions and
+  robots can be absent, and each has a catch-all row and a neutral fill for the case. An
+  `OperationCategory` is always one of the enum's members - `Uncategorised` until the user says
+  otherwise - so colouring by category never reaches the neutral fill and "uncategorised" is a chip
+  like any other. Only the categories something is actually in are offered as chips.
+- **Region categories and operation categories are separate enums** and mean different things: where
+  the work happens against what kind of work it is. `OperationDialog` shows both, which is why its
+  two fields are labelled apart.
 - **Operations can be declared simultaneous, and then never conflict.** `Operation.SimultaneousWith`
   holds the ids; the relation is symmetric and `GanttDocument.SetSimultaneous` is the only thing that
   should write it, because it writes both sides. `ConflictDetector` reads it symmetrically anyway, so

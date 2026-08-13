@@ -26,6 +26,15 @@ public sealed class Operation
     public bool HasRegion => RegionId != Guid.Empty;
 
     /// <summary>
+    /// What kind of work this is. Every operation has one - <see cref="OperationCategory.Uncategorised"/>
+    /// until the user says otherwise - so unlike a region or a robot there is no catch-all case and
+    /// nothing to test for having none.
+    /// </summary>
+    public OperationCategory Category { get; set; } = OperationCategory.Uncategorised;
+
+    public string CategoryColorKey => OperationCategoryInfo.ColorKey(Category);
+
+    /// <summary>
     /// Absolute start time. May legitimately exceed the cycle time - the chart wraps it for
     /// display, but the stored value is never rewritten when the cycle time changes.
     /// </summary>

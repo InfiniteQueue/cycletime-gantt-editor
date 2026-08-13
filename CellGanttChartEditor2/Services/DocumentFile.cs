@@ -16,10 +16,11 @@ public static class DocumentFile
     public const string Filter = "Cell Gantt chart (*.cgc)|*.cgc|All files (*.*)|*.*";
 
     /// <summary>
-    /// 2 added the per-mode row layouts, 3 the robot detail, 4 the simultaneous pairings. Older
-    /// files still load; they simply have none of what the later versions added.
+    /// 2 added the per-mode row layouts, 3 the robot detail, 4 the simultaneous pairings, 5 the
+    /// operation categories. Older files still load; they simply have none of what the later
+    /// versions added.
     /// </summary>
-    private const int CurrentVersion = 4;
+    private const int CurrentVersion = 5;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -57,6 +58,7 @@ public static class DocumentFile
                 Duration = o.Duration,
                 Notes = o.Notes,
                 SimultaneousWith = o.SimultaneousWith.Count == 0 ? null : o.SimultaneousWith.ToList(),
+                Category = o.Category.ToString(),
             }).ToList(),
             Links = document.Links.Select(l => new LinkDto
             {
@@ -117,7 +119,10 @@ public static class DocumentFile
                 RegionId = o.RegionId,
                 Start = o.Start,
                 Duration = Math.Max(0, o.Duration),
-                Notes = o.Notes
+                Notes = o.Notes,
+                Category = Enum.TryParse<OperationCategory>(o.Category, out var kind)
+                    ? kind
+                    : OperationCategory.Uncategorised,
             });
         }
 
@@ -262,6 +267,7 @@ public static class DocumentFile
         public double Duration { get; set; }
         public List<Guid>? SimultaneousWith { get; set; }
         public string? Notes { get; set; }
+        public string? Category { get; set; }
     }
 
     private sealed class LinkDto

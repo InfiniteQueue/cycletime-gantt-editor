@@ -18,6 +18,12 @@ public enum ChartColorBy
 {
     Region,
     Robot,
+
+    /// <summary>
+    /// What kind of work each bar is. Only reachable in the chronological view - the other two put a
+    /// region or a robot on every row, which then decides the colouring.
+    /// </summary>
+    Category,
 }
 
 public sealed record NamedOption<T>(T Value, string Text)
@@ -38,5 +44,6 @@ public static class ViewOptions
     {
         new NamedOption<ChartColorBy>(ChartColorBy.Region, "Region"),
         new NamedOption<ChartColorBy>(ChartColorBy.Robot, "Robot"),
+        new NamedOption<ChartColorBy>(ChartColorBy.Category, "Category"),
     };
 }

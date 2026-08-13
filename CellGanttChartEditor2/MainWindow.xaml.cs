@@ -25,6 +25,7 @@ public partial class MainWindow : Window
 
     private readonly ColorAllocator _regionColors = new();
     private readonly ColorAllocator _robotColors = new();
+    private readonly ColorAllocator _categoryColors = new();
 
     /// <summary>
     /// Past states, oldest first, and states undone out of, the most recently undone last.
@@ -47,6 +48,11 @@ public partial class MainWindow : Window
 
         Chart.RegionColors = _regionColors;
         Chart.RobotColors = _robotColors;
+        Chart.CategoryColors = _categoryColors;
+
+        // Categories are a fixed set, so their colours are allocated once and never re-shuffled by
+        // what the document happens to use - the same category keeps its colour across documents.
+        _categoryColors.Sync(OperationCategoryInfo.Options.Select(o => OperationCategoryInfo.ColorKey(o.Value)));
         Chart.Edited += (_, _) => RefreshAll();
         Chart.ConflictsChanged += (_, _) => UpdateConflictCount();
         Chart.HoveredRegionChanged += (_, regionIds) => ImageView.SetHighlightedRegions(regionIds);
@@ -118,6 +124,10 @@ public partial class MainWindow : Window
 
         var robots = new HashSet<string>(_document.Robots(), StringComparer.OrdinalIgnoreCase);
         Chart.RobotFilter.RemoveWhere(name => !robots.Contains(name));
+
+        // A category stops being offered once nothing is in it, so it cannot stay in the filter.
+        var categories = UsedCategories().ToHashSet();
+        Chart.CategoryFilter.RemoveWhere(category => !categories.Contains(category));
 
         ImageView.Regions = _document.Regions;
         ImageView.RobotMarkers = _document.PlacedRobots();
@@ -575,7 +585,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// The chips are whatever the bars are being coloured by, so that picking one always means
-    /// "keep the things wearing this colour". Which of the two it is comes from the chart, since
+    /// "keep the things wearing this colour". Which of the three it is comes from the chart, since
     /// grouping decides the colour source unless the view is chronological.
     /// </summary>
     private void RebuildFilterChips()
@@ -583,26 +593,40 @@ public partial class MainWindow : Window
         _suppressChanges = true;
         FilterPanel.Children.Clear();
 
-        var byRobot = Chart.EffectiveColorBy == ChartColorBy.Robot;
-        FilterLabel.Text = byRobot ? "Filter by robot:" : "Filter by region:";
-
-        if (byRobot)
+        switch (Chart.EffectiveColorBy)
         {
-            foreach (var robot in _document.Robots())
-                AddChip(robot, _robotColors, robot, robot, Chart.RobotFilter.Contains(robot));
+            case ChartColorBy.Robot:
+                FilterLabel.Text = "Filter by robot:";
+                foreach (var robot in _document.Robots())
+                    AddChip(robot, _robotColors, robot, robot, Chart.RobotFilter.Contains(robot));
 
-            if (_document.Robots().Count == 0)
-                AddEmptyNote("No robots defined yet.");
-        }
-        else
-        {
-            foreach (var region in _document.Regions)
-                AddChip(region.Name, _regionColors, region.ColorKey, region.Id,
-                    Chart.RegionFilter.Contains(region.Id),
-                    $"{region.Name}  -  {RegionCategoryInfo.Display(region.Category)}");
+                if (_document.Robots().Count == 0)
+                    AddEmptyNote("No robots defined yet.");
+                break;
 
-            if (_document.Regions.Count == 0)
-                AddEmptyNote("No regions defined yet.");
+            case ChartColorBy.Category:
+                // Only the categories in use are offered. Every operation has one, so unlike the
+                // other two there is never a chipless remainder to account for.
+                FilterLabel.Text = "Filter by category:";
+                foreach (var category in UsedCategories())
+                    AddChip(OperationCategoryInfo.Display(category), _categoryColors,
+                        OperationCategoryInfo.ColorKey(category), category,
+                        Chart.CategoryFilter.Contains(category));
+
+                if (_document.Operations.Count == 0)
+                    AddEmptyNote("No operations defined yet.");
+                break;
+
+            default:
+                FilterLabel.Text = "Filter by region:";
+                foreach (var region in _document.Regions)
+                    AddChip(region.Name, _regionColors, region.ColorKey, region.Id,
+                        Chart.RegionFilter.Contains(region.Id),
+                        $"{region.Name}  -  {RegionCategoryInfo.Display(region.Category)}");
+
+                if (_document.Regions.Count == 0)
+                    AddEmptyNote("No regions defined yet.");
+                break;
         }
 
         _suppressChanges = false;
@@ -644,10 +668,22 @@ public partial class MainWindow : Window
             case Guid regionId: Chart.RegionFilter.Remove(regionId); break;
             case string robot when on: Chart.RobotFilter.Add(robot); break;
             case string robot: Chart.RobotFilter.Remove(robot); break;
+            case OperationCategory category when on: Chart.CategoryFilter.Add(category); break;
+            case OperationCategory category: Chart.CategoryFilter.Remove(category); break;
             default: return;
         }
 
         Chart.Refresh();
+    }
+
+    /// <summary>Categories at least one operation is in, in the order the enum declares them.</summary>
+    private List<OperationCategory> UsedCategories()
+    {
+        var used = _document.Operations.Select(o => o.Category).ToHashSet();
+        return OperationCategoryInfo.Options
+            .Select(o => o.Value)
+            .Where(used.Contains)
+            .ToList();
     }
 
     private void ClearFilter_Click(object sender, RoutedEventArgs e)
@@ -756,6 +792,7 @@ public partial class MainWindow : Window
             Start = start,
             Duration = duration,
             Notes = draft.Notes,
+            Category = draft.OperationCategory,
         });
 
         // No name, no robot: there is nothing to register a place against.

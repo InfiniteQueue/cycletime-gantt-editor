@@ -51,12 +51,15 @@ public partial class OperationDialog : Window
                           "robot or the region blank for work that has neither.";
 
         CategoryBox.ItemsSource = RegionCategoryInfo.Options;
+        OperationCategoryBox.ItemsSource = OperationCategoryInfo.Options;
         RobotBox.ItemsSource = document.Robots();
         //OperationBox.ItemsSource = document.Operations.Select(o => o.Name).Distinct().ToList();
 
         RegionBox.ItemsSource = Choices();
         RegionBox.SelectedItem = CurrentChoice();
         CategoryBox.SelectedItem = RegionCategoryInfo.Options.First(o => o.Value == draft.Category);
+        OperationCategoryBox.SelectedItem =
+            OperationCategoryInfo.Options.First(o => o.Value == draft.OperationCategory);
 
         RobotBox.Text = draft.RobotName;
         OperationBox.Text = draft.OperationName;
@@ -190,6 +193,8 @@ public partial class OperationDialog : Window
         Draft.RegionId = choice?.Id;
         Draft.NewRegionName = RegionNameBox.Text.Trim();
         Draft.Category = (CategoryBox.SelectedItem as CategoryOption)?.Value ?? RegionCategory.Uncategorised;
+        Draft.OperationCategory = (OperationCategoryBox.SelectedItem as OperationCategoryOption)?.Value
+                                  ?? OperationCategory.Uncategorised;
         Draft.RobotName = RobotBox.Text.Trim();
         Draft.OperationName = OperationBox.Text.Trim();
         Draft.Start = StartBox.Text;

@@ -25,7 +25,7 @@ public sealed class DocumentSnapshot
     /// two lists holding the same ids are still two different lists.
     /// </summary>
     private sealed record OperationState(Operation Op, string Name, string Robot, Guid Region,
-        double Start, double Duration, string Simultaneous);
+        double Start, double Duration, string Simultaneous, OperationCategory Category);
 
     private sealed record LinkState(OperationLink Link, Guid Source, Guid Target, double Lag);
 
@@ -45,7 +45,7 @@ public sealed class DocumentSnapshot
 
         foreach (var op in document.Operations)
             snapshot._operations.Add(new OperationState(op, op.Name, op.RobotName, op.RegionId,
-                op.Start, op.Duration, Ids(op.SimultaneousWith)));
+                op.Start, op.Duration, Ids(op.SimultaneousWith), op.Category));
 
         foreach (var link in document.Links)
             snapshot._links.Add(new LinkState(link, link.SourceId, link.TargetId, link.Lag));
@@ -75,6 +75,7 @@ public sealed class DocumentSnapshot
             state.Op.RegionId = state.Region;
             state.Op.Start = state.Start;
             state.Op.Duration = state.Duration;
+            state.Op.Category = state.Category;
             state.Op.SimultaneousWith.Clear();
             state.Op.SimultaneousWith.AddRange(Ids(state.Simultaneous));
             document.Operations.Add(state.Op);
@@ -145,6 +146,8 @@ public sealed class DocumentSnapshot
                 return $"renaming \"{was.Name}\"";
             if (now.Simultaneous != was.Simultaneous)
                 return $"what \"{was.Name}\" runs alongside";
+            if (now.Category != was.Category)
+                return $"the category of \"{was.Name}\"";
             if (now.Robot != was.Robot || now.Region != was.Region)
                 return $"the change to \"{was.Name}\"";
         }

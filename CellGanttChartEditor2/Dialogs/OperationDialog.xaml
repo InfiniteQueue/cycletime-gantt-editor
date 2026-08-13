@@ -42,6 +42,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Robot"/>
@@ -70,12 +71,17 @@
             <TextBlock Grid.Row="5" Grid.Column="0" Text="Operation"/>
             <TextBox  Grid.Row="5" Grid.Column="1" x:Name="OperationBox" Height="29" PreviewKeyDown="OperationBox_KeyDown"/>
 
+            <!-- The operation's own category, which has nothing to do with the region's above. -->
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="Operation category"/>
+            <ComboBox  Grid.Row="9" Grid.Column="1" x:Name="OperationCategoryBox"
+                       DisplayMemberPath="Text" Height="29"/>
+
             <TextBlock Grid.Row="6" Grid.Column="0" Text="Start time"/>
             <TextBox   Grid.Row="6" Grid.Column="1" x:Name="StartBox" Height="29"/>
 
             <TextBlock Grid.Row="7" Grid.Column="0" Text="Duration"/>
             <TextBox   Grid.Row="7" Grid.Column="1" x:Name="DurationBox" Height="29"/>
-            
+
             <TextBlock Grid.Row="8" Grid.Column="0" Text="Notes"/>
             <TextBox   Grid.Row="8" Grid.Column="1" x:Name="NotesBox" Height="auto" MinHeight="35" TextWrapping="Wrap" KeyDown="NotesBox_KeyDown"/>
 
