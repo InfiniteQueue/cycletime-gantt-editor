@@ -126,6 +126,10 @@ public partial class ChartView : UserControl
     private double _pxPerUnit = 1;
     private bool _updatingScrollBars;
 
+    /// <summary>Middle-button pan, and where the pointer was when it was last acted on.</summary>
+    private bool _panning;
+    private Point _panPoint;
+
     private double RowPitch => RowHeight * _rowZoom;
     private double BarMargin => BarInset * _rowZoom;
 
@@ -321,6 +325,8 @@ public partial class ChartView : UserControl
         // A pick left running against the old document would never be answered, and whatever is
         // waiting on it would wait for good.
         CancelPick();
+        if (_panning)
+            EndPan();
         ClearFilters();
         _highlightedRegions.Clear();
         _zoom = 1;
@@ -1442,42 +1448,49 @@ public partial class ChartView : UserControl
             // Ctrl+wheel stretches or squashes the rows, pinned to the row under the cursor so the
             // thing being looked at stays put. Offered over the headers too, since that is as much
             // "the chart" as the bars are.
-            if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+            if ((Keyboard.Modifiers & ModifierKeys.Control) != 0 || position.X < HeaderWidth)
         {
+            //Vertical Zoom
             ZoomRows(e.Delta > 0 ? 1.15 : 1 / 1.15, position.Y);
             e.Handled = true;
             return;
         }
 
-        if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0)
+        else if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0)
         {
-            var scrollSpeed = 10;
+            //Horizontal Scroll
             _scrollX = Math.Max(0, _scrollX + Math.Sign(e.Delta) * ActualWidth * 0.05);
             Surface.InvalidateVisual();
             e.Handled = true;
             return;
         }
-        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0 || position.X < HeaderWidth)
+
+        else if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0)
         {
+            //Vertical Scroll
             _scrollY = Math.Max(0, _scrollY - Math.Sign(e.Delta) * RowPitch);
             Surface.InvalidateVisual();
             e.Handled = true;
             return;
         }
 
-        // Wheel over the chart changes the horizontal zoom, pinned to the time under the cursor.
-        var cycle = Math.Max(GanttDocument.MinCycleTime, Document.CycleTime);
-        var viewportW = Math.Max(10, Surface.ActualWidth - HeaderWidth);
-        var oldPxPerUnit = viewportW * _zoom / cycle;
-        var timeAtCursor = (position.X - HeaderWidth + _scrollX) / oldPxPerUnit;
+        else if (position.X > HeaderWidth)
+        {
+            // Horizontal Zoom
+            var cycle = Math.Max(GanttDocument.MinCycleTime, Document.CycleTime);
+            var viewportW = Math.Max(10, Surface.ActualWidth - HeaderWidth);
+            var oldPxPerUnit = viewportW * _zoom / cycle;
+            var timeAtCursor = (position.X - HeaderWidth + _scrollX) / oldPxPerUnit;
 
-        _zoom = Math.Clamp(_zoom * (e.Delta > 0 ? 1.2 : 1 / 1.2), 1, 500);
+            _zoom = Math.Clamp(_zoom * (e.Delta > 0 ? 1.2 : 1 / 1.2), 1, 500);
 
-        var newPxPerUnit = viewportW * _zoom / cycle;
-        _scrollX = timeAtCursor * newPxPerUnit - (position.X - HeaderWidth);
+            var newPxPerUnit = viewportW * _zoom / cycle;
+            _scrollX = timeAtCursor * newPxPerUnit - (position.X - HeaderWidth);
 
-        Surface.InvalidateVisual();
-        e.Handled = true;
+            Surface.InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
     }
 
     /// <summary>
@@ -1494,6 +1507,82 @@ public partial class ChartView : UserControl
 
         var above = pointerY - RulerHeight;
         _scrollY = Math.Max(0, (_scrollY + above) * (_rowZoom / previous) - above);
+        Surface.InvalidateVisual();
+    }
+
+    // -------------------------------------------------------------- panning
+
+    /// <summary>
+    /// Whether there is anywhere to pan to. The scroll bars were sized against the content on the
+    /// last render, so they are the standing answer to how much room there is either way.
+    /// </summary>
+    private bool CanPan => HScroll.Maximum > 0.5 || VScroll.Maximum > 0.5;
+
+    protected override void OnMouseDown(MouseButtonEventArgs e)
+    {
+        base.OnMouseDown(e);
+
+        if (e.ChangedButton != MouseButton.Middle || Document == null || _panning || !CanPan)
+            return;
+
+        // The editor is placed against the scroll offset, so it cannot survive the view moving.
+        CommitHeaderEditor();
+        HideTip();
+
+        _panning = true;
+        _panPoint = e.GetPosition(Surface);
+        Surface.Cursor = Cursors.ScrollAll;
+        Surface.CaptureMouse();
+        e.Handled = true;
+    }
+
+    protected override void OnMouseUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseUp(e);
+
+        if (e.ChangedButton != MouseButton.Middle || !_panning)
+            return;
+
+        EndPan();
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Alt+tab, a message box, anything that takes the mouse away mid-drag. Without this the view
+    /// would still be panning when the pointer came back, with no button held.
+    /// </summary>
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        if (_panning)
+            EndPan();
+    }
+
+    private void EndPan()
+    {
+        _panning = false;
+        Surface.ReleaseMouseCapture();
+
+        // A pick is still running underneath if one was; its cursor is the one to go back to.
+        Surface.Cursor = IsPickingBar ? Cursors.Cross : null;
+    }
+
+    /// <summary>
+    /// Moves the view under the pointer so whatever was grabbed stays there: the content goes the
+    /// way the mouse went, which is the offset going the other way.
+    ///
+    /// Each move is taken against the one before it rather than against where the drag started. The
+    /// two are the same wherever there is room to scroll, and they differ only once an edge has been
+    /// reached - where measuring from the start would bank all the travel spent pushing against it
+    /// and leave the chart still while the pointer came back across that much again.
+    /// </summary>
+    private void PanTo(Point position)
+    {
+        _scrollX -= position.X - _panPoint.X;
+        _scrollY -= position.Y - _panPoint.Y;
+        _panPoint = position;
+
+        // Both are clamped against the content on the way out, where the sizes are known.
         Surface.InvalidateVisual();
     }
 
@@ -1575,6 +1664,17 @@ public partial class ChartView : UserControl
             return;
 
         var position = e.GetPosition(Surface);
+
+        // Ahead of everything else: while panning, the pointer is moving the view and is not over
+        // anything in the sense the rest of this method means.
+        if (_panning)
+        {
+            if (e.MiddleButton == MouseButtonState.Released)
+                EndPan();
+            else
+                PanTo(position);
+            return;
+        }
 
         if (_pressedHeader != null && e.LeftButton == MouseButtonState.Pressed)
         {
@@ -1939,6 +2039,12 @@ public partial class ChartView : UserControl
     protected override void OnMouseLeave(MouseEventArgs e)
     {
         base.OnMouseLeave(e);
+
+        // Panning holds the mouse, so the pointer crossing the edge is part of the drag, not the end
+        // of it - the cursor and the hover state both stay as they are until the button comes up.
+        if (_panning)
+            return;
+
         HideTip();
         Surface.Cursor = null;
         if (_hovered != null)
