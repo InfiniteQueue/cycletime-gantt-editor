@@ -1449,6 +1449,14 @@ public partial class ChartView : UserControl
             return;
         }
 
+        if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0)
+        {
+            var scrollSpeed = 10;
+            _scrollX = Math.Max(0, _scrollX + Math.Sign(e.Delta) * ActualWidth * 0.05);
+            Surface.InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
         if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0 || position.X < HeaderWidth)
         {
             _scrollY = Math.Max(0, _scrollY - Math.Sign(e.Delta) * RowPitch);
