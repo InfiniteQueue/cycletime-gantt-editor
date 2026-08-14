@@ -79,6 +79,12 @@ public partial class ChartView : UserControl
     private static readonly Pen BarOutlinePen = Palette.Pen(Palette.BarOutline, 1);
     private static readonly Pen SelectionPen = Palette.Pen(Colors.White, 2.5);
     private static readonly Pen[] SelectionGlowPens = Palette.GlowPens(1);
+
+    /// <summary>
+    /// The same glow with its corners rounded off, for stroking round an arrowhead. A mitred join at
+    /// a point that sharp throws a spike several times the length of the head.
+    /// </summary>
+    private static readonly Pen[] HeadGlowPens = SelectionGlowPens.Select(RoundJoined).ToArray();
     private static readonly Pen DropTargetPen = Palette.Pen(Color.FromRgb(0x3D, 0xDC, 0x84), 3);
     private static readonly Pen OverlapPen = Palette.Pen(Colors.Black, 2);
     private static readonly Pen LinkPen = Palette.Pen(Palette.Link, 1.3);
@@ -106,7 +112,7 @@ public partial class ChartView : UserControl
     private readonly Dictionary<Guid, int> _rowOfOperation = new();
     private readonly List<(Rect Rect, Operation Operation)> _barHits = new();
     private readonly List<(Rect Rect, Operation Operation)> _resizeHits = new();
-    private readonly List<(Point[] Points, OperationLink Link)> _linkHits = new();
+    private readonly List<(Point[] Points, Rect Head, OperationLink Link)> _linkHits = new();
     private readonly List<(Rect Rect, Line Line)> _headerHits = new();
     private readonly List<(Rect Rect, RowGroup Group)> _chevronHits = new();
     private readonly HashSet<Guid> _highlightedRegions = new();
@@ -1289,8 +1295,6 @@ public partial class ChartView : UserControl
                 points = RouteToEdge(from, to, descending);
             }
 
-            _linkHits.Add((points, link));
-
             var selected = ReferenceEquals(link, _selectedLink);
             var pen = selected ? SelectedLinkPen : LinkPen;
             var head = selected ? Brushes.White : LinkBrush;
@@ -1302,10 +1306,19 @@ public partial class ChartView : UserControl
             if (dimmed)
                 dc.PushOpacity(Palette.DimmedOpacity);
 
+            // A selected link sits in the same white halo a selected bar does. The head carries its
+            // own, since a link short enough to be head and nothing else has no line to show one on.
+            if (selected)
+                foreach (var glow in SelectionGlowPens)
+                    for (var i = 0; i < points.Length - 1; i++)
+                        dc.DrawLine(glow, points[i], points[i + 1]);
+
             for (var i = 0; i < points.Length - 1; i++)
                 dc.DrawLine(pen, points[i], points[i + 1]);
 
-            DrawArrowHead(dc, points[^1], points[^2], head);
+            // Registered from what was actually drawn, so the head a click has to land on is the
+            // head the user is aiming at.
+            _linkHits.Add((points, DrawArrowHead(dc, points[^1], points[^2], head, selected), link));
 
             if (dimmed)
                 dc.Pop();
@@ -1335,11 +1348,12 @@ public partial class ChartView : UserControl
     /// <summary>Orthogonal route from a source end to a target start, always arriving from the left.</summary>
     private Point[] Route(Point from, Point to)
     {
-        if (to.X > from.X + LinkElbow * 2)
-        {
-            var mid = from.X + LinkElbow;
-            return new[] { from, new Point(mid, from.Y), new Point(mid, to.Y), to };
-        }
+        // Straight across, however small the gap. The knee is there to carry a link clear of the row
+        // it leaves, which one that never leaves its row has no need of - so a pair sitting close
+        // together reads as an arrowhead in the gap between them, or a stub of line behind it, and
+        // not as a loop dropped below the row to make room for a knee nothing asked for.
+        if (to.X >= from.X - 1 && Math.Abs(to.Y - from.Y) < 1)
+            return new[] { from, to };
 
         // Target sits left of the source (usually because one of them wrapped): detour around.
         var midY = (from.Y + to.Y) / 2 + (Math.Abs(to.Y - from.Y) < 1 ? RowPitch / 2 - 2 : 0);
@@ -1357,8 +1371,11 @@ public partial class ChartView : UserControl
     /// <summary>
     /// The head at the end of a link, pointing the way its last segment travels: along the row for
     /// one arriving at a bar's leading edge, and down or up for one coming from another row.
+    /// Returns the box it occupies, which is what a click on the head is tested against - a link
+    /// short enough to be head and little else is otherwise almost impossible to hit.
     /// </summary>
-    private static void DrawArrowHead(DrawingContext dc, Point tip, Point previous, Brush brush)
+    private static Rect DrawArrowHead(DrawingContext dc, Point tip, Point previous, Brush brush,
+        bool glow)
     {
         const double length = 10;
         const double halfWidth = 3.5;
@@ -1381,7 +1398,17 @@ public partial class ChartView : UserControl
         var geometry = new PathGeometry();
         geometry.Figures.Add(figure);
         geometry.Freeze();
+
+        if (glow)
+            foreach (var pen in HeadGlowPens)
+                dc.DrawGeometry(null, pen, geometry);
         dc.DrawGeometry(brush, null, geometry);
+
+        // The head only ever travels along an axis, so the box round its three corners is the head
+        // itself rather than a loose approximation of it.
+        var bounds = new Rect(back + across, back - across);
+        bounds.Union(tip);
+        return bounds;
     }
 
     private double TickStep()
@@ -1652,9 +1679,12 @@ public partial class ChartView : UserControl
             return;
         }
 
-        _pressedOperation = HitBar(position);
+        // An arrowhead answers first, even over the bar it sits on; everything else about a link
+        // only answers where no bar does.
+        var headLink = HitLinkHead(position);
+        _pressedOperation = headLink == null ? HitBar(position) : null;
         _resizing = _pressedOperation != null && OnResizeGrip(_pressedOperation, position);
-        _pressedLink = _pressedOperation == null ? HitLink(position) : null;
+        _pressedLink = headLink ?? (_pressedOperation == null ? HitLink(position) : null);
         _pressPoint = position;
 
         _selectedOperation = _pressedOperation;
@@ -2140,14 +2170,15 @@ public partial class ChartView : UserControl
         if (Document == null)
             return;
 
-        var bar = HitBar(position);
-        if (bar != null)
+        // The same order the press takes, so what a double click opens is what a click would select.
+        var link = HitLinkHead(position);
+        if (link == null && HitBar(position) is { } bar)
         {
             EditBar(bar);
             return;
         }
 
-        var link = HitLink(position);
+        link ??= HitLink(position);
         if (link != null)
         {
             var dialog = new LinkEditDialog(Document, link) { Owner = Window.GetWindow(this) };
@@ -2215,15 +2246,37 @@ public partial class ChartView : UserControl
         return null;
     }
 
+    /// <summary>
+    /// A link whose arrowhead is under the pointer. This is asked before the bars are, because a
+    /// link short enough to be head and little else has nothing else to offer a click, and the head
+    /// is drawn over the bars rather than beside them. Nothing is added to the box for slack: the
+    /// head is a few pixels across against a bar's full height, so what it takes from the bar is a
+    /// sliver at one end and the bar is still there to be grabbed. The rest of a link takes no such
+    /// precedence - a long line crossing a bar is not what the pointer is aiming at.
+    /// </summary>
+    private OperationLink? HitLinkHead(Point position)
+    {
+        if (position.X < HeaderWidth || position.Y < RulerHeight)
+            return null;
+
+        for (var i = _linkHits.Count - 1; i >= 0; i--)
+            if (!_linkHits[i].Head.IsEmpty && _linkHits[i].Head.Contains(position))
+                return _linkHits[i].Link;
+        return null;
+    }
+
     private OperationLink? HitLink(Point position)
     {
         const double tolerance = 5;
         if (position.X < HeaderWidth || position.Y < RulerHeight)
             return null;
 
+        if (HitLinkHead(position) is { } head)
+            return head;
+
         for (var i = _linkHits.Count - 1; i >= 0; i--)
         {
-            var (points, link) = _linkHits[i];
+            var (points, _, link) = _linkHits[i];
             for (var s = 0; s < points.Length - 1; s++)
                 if (DistanceToSegment(position, points[s], points[s + 1]) <= tolerance)
                     return link;
@@ -2248,9 +2301,15 @@ public partial class ChartView : UserControl
         if (Document == null)
             return;
 
-        var bar = HitBar(position);
-        var header = bar == null && position.X < HeaderWidth ? HitHeader(position) : null;
-        object? hit = bar;
+        // Hovering answers in the order a click would, so the tooltip names the thing that would be
+        // selected rather than the bar an arrowhead is lying on.
+        var headLink = HitLinkHead(position);
+        var bar = headLink == null ? HitBar(position) : null;
+        var header = headLink == null && bar == null && position.X < HeaderWidth
+            ? HitHeader(position)
+            : null;
+        object? hit = headLink;
+        hit ??= bar;
         hit ??= header;
         hit ??= HitLink(position);
 
@@ -2469,6 +2528,14 @@ public partial class ChartView : UserControl
     private FormattedText Text(string value, double emSize, Brush brush, Typeface face) => new(
         value, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, face, emSize, brush,
         VisualTreeHelper.GetDpi(this).PixelsPerDip);
+
+    private static Pen RoundJoined(Pen pen)
+    {
+        var rounded = pen.Clone();
+        rounded.LineJoin = PenLineJoin.Round;
+        rounded.Freeze();
+        return rounded;
+    }
 
     private static Pen MakeGhostPen()
     {
