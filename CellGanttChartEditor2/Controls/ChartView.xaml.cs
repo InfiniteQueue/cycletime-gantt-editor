@@ -1185,23 +1185,25 @@ public partial class ChartView : UserControl
     private void DrawBarLabel(DrawingContext dc, Operation op, Rect rect,
         (double From, double To) band, Func<double, double> x)
     {
-        void Draw(Brush brush, Geometry clip)
+        void Draw(Brush brush, Geometry clip, bool checkered)
         {
             var text = Text(LabelOf(op), Scaled(11.5), brush, BoldFace);
             text.MaxTextWidth = Math.Max(8, rect.Width - 8);
             text.MaxLineCount = 1;
             text.Trimming = TextTrimming.CharacterEllipsis;
 
+            var origin = new Point(rect.Left + 5, rect.Top + (rect.Height - text.Height) / 2);
             dc.PushClip(clip);
-            dc.DrawText(text, new Point(rect.Left + 5, rect.Top + (rect.Height - text.Height) / 2));
+            TextBorder.Draw(dc, text, origin, brush, checkered);
             dc.Pop();
         }
 
+        var checkered = CheckeredFill(op);
         var bar = new RectangleGeometry(rect);
         var marks = ShowOverlaps ? OverlapRects(op, band, rect, x) : new List<Rect>();
         if (marks.Count == 0)
         {
-            Draw(TextOn(op), bar);
+            Draw(TextOn(op), bar, checkered);
             return;
         }
 
@@ -1216,9 +1218,21 @@ public partial class ChartView : UserControl
             marked.Children.Add(new RectangleGeometry(mark));
         }
 
-        Draw(TextOn(op), unmarked);
-        Draw(Brushes.Black, marked);
+        Draw(TextOn(op), unmarked, checkered);
+        // The clash marker is flat white whatever the bar is, so that pass never wants a border.
+        Draw(Brushes.Black, marked, false);
     }
+
+    /// <summary>
+    /// Whether the fill this bar is drawn in is a checkered pair rather than a flat colour, which is
+    /// what decides whether its label is bordered. Reads the same source as <see cref="TextOn"/>.
+    /// </summary>
+    private bool CheckeredFill(Operation op) => EffectiveColorBy switch
+    {
+        ChartColorBy.Category => CategoryColors.IsCheckered(op.CategoryColorKey),
+        ChartColorBy.Robot => op.HasRobot && RobotColors.IsCheckered(op.RobotName),
+        _ => Document?.RegionOf(op) is { } region && RegionColors.IsCheckered(region.ColorKey),
+    };
 
     /// <summary>Black or white for a bar's label, from the fill the bar is actually drawn in.</summary>
     private Brush TextOn(Operation op) => EffectiveColorBy switch

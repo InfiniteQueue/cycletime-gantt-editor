@@ -34,9 +34,9 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="#60000000" BorderThickness="1"
                                 CornerRadius="3" Padding="9,3" Opacity="0.5">
-                            <TextBlock Text="{TemplateBinding Content}"
-                                       Foreground="{TemplateBinding Foreground}"
-                                       FontWeight="SemiBold"/>
+                            <!-- The content is a BorderedText the code puts there, which carries its
+                                 own colour and knows whether the fill behind it is checkered. -->
+                            <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">

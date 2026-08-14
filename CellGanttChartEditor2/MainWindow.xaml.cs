@@ -636,10 +636,14 @@ public partial class MainWindow : Window
         {
             var chip = new ToggleButton
             {
-                Content = text,
+                Content = new BorderedText
+                {
+                    Text = text,
+                    Foreground = colors.GetTextBrush(colorKey),
+                    Checkered = colors.IsCheckered(colorKey),
+                },
                 Style = (Style)FindResource("FilterChip"),
                 Background = colors.GetBrush(colorKey),
-                Foreground = colors.GetTextBrush(colorKey),
                 Tag = tag,
                 IsChecked = on,
                 ToolTip = tip ?? text,
