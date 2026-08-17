@@ -44,12 +44,15 @@ public static class Palette
     public static readonly Color GroupEdge = Rgb(0x4A, 0x51, 0x60);
     public static readonly Color GroupBlock = Rgb(0x8A, 0x92, 0xA3);
 
-    //Todo: make this whiter
     /// <summary>
-    /// A robot's crosshair on the image while nothing is colouring robots. Deliberately the same
-    /// neutral as the collapsed group block: it marks a thing the chart is not currently keying on.
+    /// A robot's crosshair on the image while nothing is colouring robots. Near enough white to read
+    /// over a photograph, keeping the faint cool tint the darker neutrals have - the chroma and hue
+    /// are the ones it wore at its old lightness, so only its brightness has changed.
     /// </summary>
-    public static readonly Color Crosshair = Rgb(0xC2, 0xC8, 0xD4);
+    public static readonly Color Crosshair = ColorMaths.FromLch(CrosshairLightness, 6.7, 272);
+
+    /// <summary>CIELCh lightness of the crosshair, out of 100.</summary>
+    private const double CrosshairLightness = 95;
 
     /// <summary>Where a dragged row would land.</summary>
     public static readonly Color DropIndicator = Rgb(0x3D, 0xDC, 0x84);
