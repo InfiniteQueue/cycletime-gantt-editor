@@ -50,7 +50,7 @@
             <!-- The category is the operation's own, so unlike the robot and the region above it is
                  editable here. -->
             <TextBlock Grid.Row="3" Grid.Column="0" Text="Category"/>
-            <ComboBox  Grid.Row="3" Grid.Column="1" x:Name="CategoryBox" DisplayMemberPath="Text"
+            <ComboBox  Grid.Row="3" Grid.Column="1" x:Name="CategoryBox" IsEditable="True"
                        Margin="0,3"/>
 
             <Separator Grid.Row="4" Grid.ColumnSpan="2" Margin="0,8"/>

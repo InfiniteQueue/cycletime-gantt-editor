@@ -298,21 +298,31 @@ public partial class ItemListView : UserControl
             RaiseEdited();
         };
 
-        // The operation's own category, chosen from the fixed set the enum declares.
+        // The operation's own category: typed or picked, the list being suggestions rather than the
+        // whole of what a category may be.
         var categoryBox = Field(details, "Category", new ComboBox
         {
-            ItemsSource = OperationCategoryInfo.Options,
-            SelectedItem = OperationCategoryInfo.Options.FirstOrDefault(o => o.Value == op.Category),
-            DisplayMemberPath = "Text",
+            // IsEditable first: a ComboBox only keeps a Text of its own once it is editable.
+            IsEditable = true,
+            ItemsSource = OperationCategories.Suggestions(Document),
+            Text = op.Category,
         });
-        categoryBox.SelectionChanged += (_, _) =>
+
+        // Picking from the list commits at once; typing commits when the box is left, since every
+        // keystroke on the way to a name is not an edit worth putting on the undo stack.
+        categoryBox.SelectionChanged += (_, _) => ApplyCategory();
+        categoryBox.LostFocus += (_, _) => ApplyCategory();
+
+        void ApplyCategory()
         {
-            if (_building || categoryBox.SelectedItem is not OperationCategoryOption option ||
-                option.Value == op.Category)
+            if (_building)
                 return;
-            op.Category = option.Value;
+            var typed = OperationCategories.Canonical(categoryBox.Text, Document);
+            if (string.Equals(typed, op.Category, StringComparison.Ordinal))
+                return;
+            op.Category = typed;
             RaiseEdited();
-        };
+        }
 
         var start = Field(details, "Start time", new TextBox { Text = TimeMath.Format(op.Start) });
         var duration = Field(details, "Duration", new TextBox { Text = TimeMath.Format(op.Duration) });

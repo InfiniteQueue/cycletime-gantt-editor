@@ -37,7 +37,7 @@ public sealed class OperationDraft
     public RegionCategory Category { get; set; } = RegionCategory.Uncategorised;
 
     /// <summary>What kind of work the operation itself is. Nothing to do with the region's.</summary>
-    public OperationCategory OperationCategory { get; set; } = OperationCategory.Uncategorised;
+    public string OperationCategory { get; set; } = OperationCategories.Uncategorised;
 
     public string RobotName { get; set; } = string.Empty;
 

@@ -58,7 +58,7 @@ public static class DocumentFile
                 Duration = o.Duration,
                 Notes = o.Notes,
                 SimultaneousWith = o.SimultaneousWith.Count == 0 ? null : o.SimultaneousWith.ToList(),
-                Category = o.Category.ToString(),
+                Category = o.Category,
             }).ToList(),
             Links = document.Links.Select(l => new LinkDto
             {
@@ -120,9 +120,12 @@ public static class DocumentFile
                 Start = o.Start,
                 Duration = Math.Max(0, o.Duration),
                 Notes = o.Notes,
-                Category = Enum.TryParse<OperationCategory>(o.Category, out var kind)
-                    ? kind
-                    : OperationCategory.Uncategorised,
+                // Categories were an enum once and are free text now, but both wrote the name into
+                // this field, so an older file's "Weld" is simply the category called Weld. Only a
+                // missing or blank one needs answering for.
+                Category = string.IsNullOrWhiteSpace(o.Category)
+                    ? OperationCategories.Uncategorised
+                    : o.Category.Trim(),
             });
         }
 

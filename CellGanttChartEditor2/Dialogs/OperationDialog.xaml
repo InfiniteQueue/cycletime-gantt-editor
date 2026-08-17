@@ -82,8 +82,10 @@
 
             <!-- The operation's own category, which has nothing to do with the region's above. -->
             <TextBlock Grid.Row="9" Grid.Column="0" Text="Operation category"/>
+            <!-- Editable, as the robot box is: the list is a set of suggestions, not the whole of
+                 what a category may be. -->
             <ComboBox  Grid.Row="9" Grid.Column="1" x:Name="OperationCategoryBox"
-                       DisplayMemberPath="Text" Height="29"/>
+                       IsEditable="True" Height="29"/>
 
         </Grid>
 

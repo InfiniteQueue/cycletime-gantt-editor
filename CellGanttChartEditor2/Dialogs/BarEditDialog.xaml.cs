@@ -54,8 +54,8 @@ public partial class BarEditDialog : Window
         StartBox.Text = draft.Start;
         DurationBox.Text = draft.Duration;
         NotesBox.Text = draft.Notes;
-        CategoryBox.ItemsSource = OperationCategoryInfo.Options;
-        CategoryBox.SelectedItem = OperationCategoryInfo.Options.First(o => o.Value == draft.Category);
+        CategoryBox.ItemsSource = OperationCategories.Suggestions(document);
+        CategoryBox.Text = draft.Category;
 
         ShowSimultaneous();
 
@@ -205,8 +205,9 @@ public partial class BarEditDialog : Window
         Draft.Start = StartBox.Text;
         Draft.Duration = DurationBox.Text;
         Draft.Notes = NotesBox.Text;
-        Draft.Category = (CategoryBox.SelectedItem as OperationCategoryOption)?.Value
-                         ?? OperationCategory.Uncategorised;
+        // Kept as typed; it is made canonical where it lands on the operation, which is the only
+        // place that knows what other categories the document has.
+        Draft.Category = CategoryBox.Text;
     }
 
     private void NotesBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -241,7 +242,7 @@ public sealed class BarEditDraft
 
     public string? Notes { get; set; } = string.Empty;
 
-    public OperationCategory Category { get; set; } = OperationCategory.Uncategorised;
+    public string Category { get; set; } = OperationCategories.Uncategorised;
 
     public static BarEditDraft From(Operation op)
     {

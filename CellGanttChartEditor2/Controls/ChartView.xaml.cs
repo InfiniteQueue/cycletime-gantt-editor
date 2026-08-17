@@ -217,7 +217,7 @@ public partial class ChartView : UserControl
     public HashSet<string> RobotFilter { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Categories to keep, used while the colouring is by category.</summary>
-    public HashSet<OperationCategory> CategoryFilter { get; } = new();
+    public HashSet<string> CategoryFilter { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The filter follows whatever the bars are coloured by, so the chips the user picks from are
@@ -703,7 +703,7 @@ public partial class ChartView : UserControl
 
         var other = EffectiveColorBy switch
         {
-            ChartColorBy.Category => OperationCategoryInfo.Display(op.Category),
+            ChartColorBy.Category => op.Category,
             ChartColorBy.Robot => Document?.RegionOf(op)?.Name ?? "(no region)",
             _ => op.HasRobot ? op.RobotName : "(no robot)",
         };
@@ -2154,7 +2154,7 @@ public partial class ChartView : UserControl
 
             bar.Name = dialog.OperationName;
             bar.Notes = dialog.Notes;
-            bar.Category = draft.Category;
+            bar.Category = OperationCategories.Canonical(draft.Category, Document);
             Document.SetSimultaneous(bar, draft.Simultaneous);
             Document.EditTiming(bar, dialog.Start, dialog.Duration);
             RaiseEdited();

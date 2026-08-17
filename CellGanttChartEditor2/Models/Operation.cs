@@ -26,13 +26,15 @@ public sealed class Operation
     public bool HasRegion => RegionId != Guid.Empty;
 
     /// <summary>
-    /// What kind of work this is. Every operation has one - <see cref="OperationCategory.Uncategorised"/>
-    /// until the user says otherwise - so unlike a region or a robot there is no catch-all case and
-    /// nothing to test for having none.
+    /// What kind of work this is, as free text - see <see cref="OperationCategories"/>. Every
+    /// operation has one - <see cref="OperationCategories.Uncategorised"/> until the user says
+    /// otherwise - so unlike a region or a robot there is no catch-all case and nothing to test for
+    /// having none. Set it through <see cref="OperationCategories.Canonical"/> so what the user
+    /// typed joins any category of that name already in the document.
     /// </summary>
-    public OperationCategory Category { get; set; } = OperationCategory.Uncategorised;
+    public string Category { get; set; } = OperationCategories.Uncategorised;
 
-    public string CategoryColorKey => OperationCategoryInfo.ColorKey(Category);
+    public string CategoryColorKey => OperationCategories.ColorKey(Category);
 
     /// <summary>
     /// Absolute start time. May legitimately exceed the cycle time - the chart wraps it for

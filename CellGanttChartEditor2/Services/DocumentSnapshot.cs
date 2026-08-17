@@ -25,7 +25,7 @@ public sealed class DocumentSnapshot
     /// two lists holding the same ids are still two different lists.
     /// </summary>
     private sealed record OperationState(Operation Op, string Name, string Robot, Guid Region,
-        double Start, double Duration, string Simultaneous, OperationCategory Category);
+        double Start, double Duration, string Simultaneous, string Category);
 
     private sealed record LinkState(OperationLink Link, Guid Source, Guid Target, double Lag);
 

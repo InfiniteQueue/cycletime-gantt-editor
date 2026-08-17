@@ -49,10 +49,6 @@ public partial class MainWindow : Window
         Chart.RegionColors = _regionColors;
         Chart.RobotColors = _robotColors;
         Chart.CategoryColors = _categoryColors;
-
-        // Categories are a fixed set, so their colours are allocated once and never re-shuffled by
-        // what the document happens to use - the same category keeps its colour across documents.
-        _categoryColors.Sync(OperationCategoryInfo.Options.Select(o => OperationCategoryInfo.ColorKey(o.Value)));
         Chart.Edited += (_, _) => RefreshAll();
         Chart.ConflictsChanged += (_, _) => UpdateConflictCount();
         Chart.HoveredRegionChanged += (_, regionIds) => ImageView.SetHighlightedRegions(regionIds);
@@ -116,6 +112,10 @@ public partial class MainWindow : Window
         _regionColors.Sync(_document.Regions.Select(r => r.ColorKey));
         _robotColors.Sync(_document.Robots());
 
+        // The presets first, so the ones the editor ships with keep their colours from document to
+        // document; anything typed into this one follows behind them.
+        _categoryColors.Sync(OperationCategories.Suggestions(_document).Select(OperationCategories.ColorKey));
+
         // A region only goes when it is deleted outright, which takes its operations with it. A
         // robot can also lose its last operation and stop being offered, so both filters are pruned
         // to what there are still chips for.
@@ -126,7 +126,7 @@ public partial class MainWindow : Window
         Chart.RobotFilter.RemoveWhere(name => !robots.Contains(name));
 
         // A category stops being offered once nothing is in it, so it cannot stay in the filter.
-        var categories = UsedCategories().ToHashSet();
+        var categories = UsedCategories().ToHashSet(StringComparer.OrdinalIgnoreCase);
         Chart.CategoryFilter.RemoveWhere(category => !categories.Contains(category));
 
         ImageView.Regions = _document.Regions;
@@ -609,9 +609,8 @@ public partial class MainWindow : Window
                 // other two there is never a chipless remainder to account for.
                 FilterLabel.Text = "Filter by category:";
                 foreach (var category in UsedCategories())
-                    AddChip(OperationCategoryInfo.Display(category), _categoryColors,
-                        OperationCategoryInfo.ColorKey(category), category,
-                        Chart.CategoryFilter.Contains(category));
+                    AddChip(category, _categoryColors, OperationCategories.ColorKey(category),
+                        category, Chart.CategoryFilter.Contains(category));
 
                 if (_document.Operations.Count == 0)
                     AddEmptyNote("No operations defined yet.");
@@ -666,28 +665,45 @@ public partial class MainWindow : Window
             return;
 
         var on = chip.IsChecked == true;
-        switch (chip.Tag)
+
+        // Which set a chip belongs to is decided by what the chart is coloured by, not by the type
+        // of its tag: a robot's name and an operation category are both strings, so the tag alone
+        // can no longer tell them apart.
+        switch (Chart.EffectiveColorBy)
         {
-            case Guid regionId when on: Chart.RegionFilter.Add(regionId); break;
-            case Guid regionId: Chart.RegionFilter.Remove(regionId); break;
-            case string robot when on: Chart.RobotFilter.Add(robot); break;
-            case string robot: Chart.RobotFilter.Remove(robot); break;
-            case OperationCategory category when on: Chart.CategoryFilter.Add(category); break;
-            case OperationCategory category: Chart.CategoryFilter.Remove(category); break;
+            case ChartColorBy.Robot when chip.Tag is string robot:
+                Toggle(Chart.RobotFilter, robot);
+                break;
+            case ChartColorBy.Category when chip.Tag is string category:
+                Toggle(Chart.CategoryFilter, category);
+                break;
+            case ChartColorBy.Region when chip.Tag is Guid regionId:
+                Toggle(Chart.RegionFilter, regionId);
+                break;
             default: return;
+        }
+
+        void Toggle<T>(HashSet<T> filter, T value)
+        {
+            if (on)
+                filter.Add(value);
+            else
+                filter.Remove(value);
         }
 
         Chart.Refresh();
     }
 
-    /// <summary>Categories at least one operation is in, in the order the enum declares them.</summary>
-    private List<OperationCategory> UsedCategories()
+    /// <summary>
+    /// Categories at least one operation is in, presets first and then whatever the document named
+    /// for itself - the order the dropdowns offer them in, so the chips read the same way.
+    /// </summary>
+    private List<string> UsedCategories()
     {
-        var used = _document.Operations.Select(o => o.Category).ToHashSet();
-        return OperationCategoryInfo.Options
-            .Select(o => o.Value)
-            .Where(used.Contains)
-            .ToList();
+        var used = _document.Operations
+            .Select(o => o.Category)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return OperationCategories.Suggestions(_document).Where(used.Contains).ToList();
     }
 
     private void ClearFilter_Click(object sender, RoutedEventArgs e)
@@ -796,7 +812,7 @@ public partial class MainWindow : Window
             Start = start,
             Duration = duration,
             Notes = draft.Notes,
-            Category = draft.OperationCategory,
+            Category = OperationCategories.Canonical(draft.OperationCategory, _document),
         });
 
         // No name, no robot: there is nothing to register a place against.
