@@ -29,6 +29,12 @@ public static class RegionCategoryInfo
 
     public static IReadOnlyList<CategoryOption> Options { get; } =
         Enum.GetValues<RegionCategory>().Select(c => new CategoryOption(c, Display(c))).ToList();
+
+    /// <summary>
+    /// The key a category's colour is allocated against. These are a fixed set rather than named
+    /// things, so the name of the member is a stable key without needing an id.
+    /// </summary>
+    public static string ColorKey(RegionCategory category) => category.ToString();
 }
 
 public sealed record CategoryOption(RegionCategory Value, string Text)

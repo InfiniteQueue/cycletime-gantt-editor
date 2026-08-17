@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly ColorAllocator _regionColors = new();
     private readonly ColorAllocator _robotColors = new();
     private readonly ColorAllocator _categoryColors = new();
+    private readonly ColorAllocator _regionCategoryColors = new();
 
     /// <summary>
     /// Past states, oldest first, and states undone out of, the most recently undone last.
@@ -49,6 +50,12 @@ public partial class MainWindow : Window
         Chart.RegionColors = _regionColors;
         Chart.RobotColors = _robotColors;
         Chart.CategoryColors = _categoryColors;
+        Chart.RegionCategoryColors = _regionCategoryColors;
+
+        // Region categories are a fixed set, so their colours are allocated once and never
+        // re-shuffled by what the document happens to use - one keeps its colour across documents.
+        // Operation categories are open-ended and so are synced per document, in RefreshAll.
+        _regionCategoryColors.Sync(RegionCategoryInfo.Options.Select(o => RegionCategoryInfo.ColorKey(o.Value)));
         Chart.Edited += (_, _) => RefreshAll();
         Chart.ConflictsChanged += (_, _) => UpdateConflictCount();
         Chart.HoveredRegionChanged += (_, regionIds) => ImageView.SetHighlightedRegions(regionIds);
@@ -128,6 +135,9 @@ public partial class MainWindow : Window
         // A category stops being offered once nothing is in it, so it cannot stay in the filter.
         var categories = UsedCategories().ToHashSet(StringComparer.OrdinalIgnoreCase);
         Chart.CategoryFilter.RemoveWhere(category => !categories.Contains(category));
+
+        var regionCategories = UsedRegionCategories().ToHashSet();
+        Chart.RegionCategoryFilter.RemoveWhere(category => !regionCategories.Contains(category));
 
         ImageView.Regions = _document.Regions;
         ImageView.RobotMarkers = _document.PlacedRobots();
@@ -604,16 +614,29 @@ public partial class MainWindow : Window
                     AddEmptyNote("No robots defined yet.");
                 break;
 
-            case ChartColorBy.Category:
+            case ChartColorBy.OperationCategory:
                 // Only the categories in use are offered. Every operation has one, so unlike the
-                // other two there is never a chipless remainder to account for.
-                FilterLabel.Text = "Filter by category:";
+                // regions and robots there is never a chipless remainder to account for.
+                FilterLabel.Text = "Filter by operation category:";
                 foreach (var category in UsedCategories())
                     AddChip(category, _categoryColors, OperationCategories.ColorKey(category),
                         category, Chart.CategoryFilter.Contains(category));
 
                 if (_document.Operations.Count == 0)
                     AddEmptyNote("No operations defined yet.");
+                break;
+
+            case ChartColorBy.RegionCategory:
+                // Work with no region is in no region category, so here there is a remainder again -
+                // and no chip for it, as with the regions themselves.
+                FilterLabel.Text = "Filter by region category:";
+                foreach (var category in UsedRegionCategories())
+                    AddChip(RegionCategoryInfo.Display(category), _regionCategoryColors,
+                        RegionCategoryInfo.ColorKey(category), category,
+                        Chart.RegionCategoryFilter.Contains(category));
+
+                if (_document.Regions.Count == 0)
+                    AddEmptyNote("No regions defined yet.");
                 break;
 
             default:
@@ -674,8 +697,11 @@ public partial class MainWindow : Window
             case ChartColorBy.Robot when chip.Tag is string robot:
                 Toggle(Chart.RobotFilter, robot);
                 break;
-            case ChartColorBy.Category when chip.Tag is string category:
+            case ChartColorBy.OperationCategory when chip.Tag is string category:
                 Toggle(Chart.CategoryFilter, category);
+                break;
+            case ChartColorBy.RegionCategory when chip.Tag is RegionCategory category:
+                Toggle(Chart.RegionCategoryFilter, category);
                 break;
             case ChartColorBy.Region when chip.Tag is Guid regionId:
                 Toggle(Chart.RegionFilter, regionId);
@@ -704,6 +730,19 @@ public partial class MainWindow : Window
             .Select(o => o.Category)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         return OperationCategories.Suggestions(_document).Where(used.Contains).ToList();
+    }
+
+    /// <summary>
+    /// Region categories at least one operation's region is in, in the order the enum declares them.
+    /// Work with no region is in none of them, and gets no chip - the same way it gets no colour.
+    /// </summary>
+    private List<RegionCategory> UsedRegionCategories()
+    {
+        var used = _document.Operations
+            .Select(o => _document.RegionOf(o)?.Category)
+            .OfType<RegionCategory>()
+            .ToHashSet();
+        return RegionCategoryInfo.Options.Select(o => o.Value).Where(used.Contains).ToList();
     }
 
     private void ClearFilter_Click(object sender, RoutedEventArgs e)

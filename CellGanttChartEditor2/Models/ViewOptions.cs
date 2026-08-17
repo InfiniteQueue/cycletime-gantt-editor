@@ -23,7 +23,14 @@ public enum ChartColorBy
     /// What kind of work each bar is. Only reachable in the chronological view - the other two put a
     /// region or a robot on every row, which then decides the colouring.
     /// </summary>
-    Category,
+    OperationCategory,
+
+    /// <summary>
+    /// What kind of place each bar's work happens in. Also chronological-only, and the one colour
+    /// source of the four that an operation can fail to have: work with no region has no region
+    /// category either, and takes the neutral fill.
+    /// </summary>
+    RegionCategory,
 }
 
 public sealed record NamedOption<T>(T Value, string Text)
@@ -44,6 +51,8 @@ public static class ViewOptions
     {
         new NamedOption<ChartColorBy>(ChartColorBy.Region, "Region"),
         new NamedOption<ChartColorBy>(ChartColorBy.Robot, "Robot"),
-        new NamedOption<ChartColorBy>(ChartColorBy.Category, "Category"),
+        // Named apart, since an operation's category and its region's are different questions.
+        new NamedOption<ChartColorBy>(ChartColorBy.OperationCategory, "Operation category"),
+        new NamedOption<ChartColorBy>(ChartColorBy.RegionCategory, "Region category"),
     };
 }

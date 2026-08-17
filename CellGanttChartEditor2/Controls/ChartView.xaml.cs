@@ -206,6 +206,8 @@ public partial class ChartView : UserControl
 
     public ColorAllocator CategoryColors { get; set; } = new();
 
+    public ColorAllocator RegionCategoryColors { get; set; } = new();
+
     public ChartGroupMode GroupMode { get; private set; } = ChartGroupMode.Region;
 
     public ChartColorBy ColorMode { get; private set; } = ChartColorBy.Region;
@@ -216,8 +218,11 @@ public partial class ChartView : UserControl
     /// <summary>Robots to keep, used while the colouring is by robot. Empty means no filtering.</summary>
     public HashSet<string> RobotFilter { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Categories to keep, used while the colouring is by category.</summary>
+    /// <summary>Categories to keep, used while the colouring is by operation category.</summary>
     public HashSet<string> CategoryFilter { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Region categories to keep, used while the colouring is by region category.</summary>
+    public HashSet<RegionCategory> RegionCategoryFilter { get; } = new();
 
     /// <summary>
     /// The filter follows whatever the bars are coloured by, so the chips the user picks from are
@@ -226,17 +231,24 @@ public partial class ChartView : UserControl
     /// </summary>
     public bool Filtering => EffectiveColorBy switch
     {
-        ChartColorBy.Category => CategoryFilter.Count > 0,
+        ChartColorBy.OperationCategory => CategoryFilter.Count > 0,
+        ChartColorBy.RegionCategory => RegionCategoryFilter.Count > 0,
         ChartColorBy.Robot => RobotFilter.Count > 0,
         _ => RegionFilter.Count > 0,
     };
 
     private bool InFilter(Operation op) => EffectiveColorBy switch
     {
-        ChartColorBy.Category => CategoryFilter.Contains(op.Category),
+        ChartColorBy.OperationCategory => CategoryFilter.Contains(op.Category),
+        // Work with no region is in no region category, so no chip can name it.
+        ChartColorBy.RegionCategory => RegionCategoryOf(op) is { } category &&
+                                       RegionCategoryFilter.Contains(category),
         ChartColorBy.Robot => op.HasRobot && RobotFilter.Contains(op.RobotName),
         _ => RegionFilter.Contains(op.RegionId),
     };
+
+    /// <summary>The category of the region an operation happens in, or null where it has no region.</summary>
+    private RegionCategory? RegionCategoryOf(Operation op) => Document?.RegionOf(op)?.Category;
 
     /// <summary>True while the chart is waiting for the user to click an operation.</summary>
     public bool IsPickingBar => _barPick != null;
@@ -277,6 +289,7 @@ public partial class ChartView : UserControl
         RegionFilter.Clear();
         RobotFilter.Clear();
         CategoryFilter.Clear();
+        RegionCategoryFilter.Clear();
     }
 
     public bool ShowOverlaps { get; private set; } = true;
@@ -689,7 +702,11 @@ public partial class ChartView : UserControl
     private Brush FillOf(Operation op) => EffectiveColorBy switch
     {
         // Every operation has a category, so this branch never falls back to the neutral fill.
-        ChartColorBy.Category => CategoryColors.GetBrush(op.CategoryColorKey),
+        ChartColorBy.OperationCategory => CategoryColors.GetBrush(op.CategoryColorKey),
+        // A region's category, though, is only there when the operation has a region at all.
+        ChartColorBy.RegionCategory => RegionCategoryOf(op) is { } category
+            ? RegionCategoryColors.GetBrush(RegionCategoryInfo.ColorKey(category))
+            : UnassignedBrush,
         ChartColorBy.Robot => op.HasRobot ? RobotColors.GetBrush(op.RobotName) : UnassignedBrush,
         _ => Document?.RegionOf(op) is { } region
             ? RegionColors.GetBrush(region.ColorKey)
@@ -703,7 +720,10 @@ public partial class ChartView : UserControl
 
         var other = EffectiveColorBy switch
         {
-            ChartColorBy.Category => op.Category,
+            ChartColorBy.OperationCategory => op.Category,
+            ChartColorBy.RegionCategory => RegionCategoryOf(op) is { } category
+                ? RegionCategoryInfo.Display(category)
+                : "(no region)",
             ChartColorBy.Robot => Document?.RegionOf(op)?.Name ?? "(no region)",
             _ => op.HasRobot ? op.RobotName : "(no robot)",
         };
@@ -1235,7 +1255,9 @@ public partial class ChartView : UserControl
     /// </summary>
     private bool CheckeredFill(Operation op) => EffectiveColorBy switch
     {
-        ChartColorBy.Category => CategoryColors.IsCheckered(op.CategoryColorKey),
+        ChartColorBy.OperationCategory => CategoryColors.IsCheckered(op.CategoryColorKey),
+        ChartColorBy.RegionCategory => RegionCategoryOf(op) is { } category &&
+                                       RegionCategoryColors.IsCheckered(RegionCategoryInfo.ColorKey(category)),
         ChartColorBy.Robot => op.HasRobot && RobotColors.IsCheckered(op.RobotName),
         _ => Document?.RegionOf(op) is { } region && RegionColors.IsCheckered(region.ColorKey),
     };
@@ -1243,7 +1265,10 @@ public partial class ChartView : UserControl
     /// <summary>Black or white for a bar's label, from the fill the bar is actually drawn in.</summary>
     private Brush TextOn(Operation op) => EffectiveColorBy switch
     {
-        ChartColorBy.Category => CategoryColors.GetTextBrush(op.CategoryColorKey),
+        ChartColorBy.OperationCategory => CategoryColors.GetTextBrush(op.CategoryColorKey),
+        ChartColorBy.RegionCategory => RegionCategoryOf(op) is { } category
+            ? RegionCategoryColors.GetTextBrush(RegionCategoryInfo.ColorKey(category))
+            : UnassignedTextBrush,
         ChartColorBy.Robot => op.HasRobot ? RobotColors.GetTextBrush(op.RobotName) : UnassignedTextBrush,
         _ => Document?.RegionOf(op) is { } region
             ? RegionColors.GetTextBrush(region.ColorKey)
