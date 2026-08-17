@@ -7,20 +7,23 @@
         Style="{StaticResource ThemedWindow}">
 
     <Window.Resources>
+        <!-- The 3 above and below each item is half the toolbar's old inset, moved off the panel and
+             onto the items themselves. It reads the same on one row, and when the WrapPanel breaks
+             into two it is what holds the rows apart - a margin on the panel could not. -->
         <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Margin" Value="0,3,4,3"/>
             <Setter Property="MinWidth" Value="70"/>
         </Style>
 
         <Style x:Key="ToolToggle" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
-            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Margin" Value="0,3,4,3"/>
         </Style>
 
         <Style x:Key="ToolLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="Foreground" Value="{StaticResource ToolLabelBrush}"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="8,0,5,0"/>
+            <Setter Property="Margin" Value="8,3,5,3"/>
         </Style>
 
         <!-- Filter chip. The fill is the colour its region or robot uses everywhere else. -->
@@ -62,9 +65,9 @@
                 BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
             <!-- A DockPanel rather than the WrapPanel alone, so the items toggle can sit hard against
                  the right edge while the rest of the toolbar still wraps. -->
-            <DockPanel Margin="8,6">
+            <DockPanel Margin="8,3">
             <ToggleButton DockPanel.Dock="Right" x:Name="ItemsToggle" Style="{StaticResource ToolToggle}"
-                          Content="Show all items" Margin="8,0,0,0" VerticalAlignment="Center"
+                          Content="Show all items" Margin="8,3,0,3" VerticalAlignment="Center"
                           ToolTip="List every region and robot, with their properties."
                           Checked="ItemsToggle_Changed" Unchecked="ItemsToggle_Changed"/>
             <WrapPanel Orientation="Horizontal">
@@ -73,25 +76,26 @@
                 <Button Style="{StaticResource ToolButton}" Content="Save" Click="Save_Click"/>
                 <Button Style="{StaticResource ToolButton}" Content="Save as..." Click="SaveAs_Click"/>
 
-                <Separator Margin="7,2" Width="1" Height="22"/>
+                <Separator Margin="7,3" Width="1" Height="22"/>
 
                 <Button Style="{StaticResource ToolButton}" x:Name="ImageButton"
                         Content="Load image..." Click="LoadImage_Click" MinWidth="100"/>
                 <Button Style="{StaticResource ToolButton}" Content="Fit image" Click="FitImage_Click"/>
 
-                <Separator Margin="7,2" Width="1" Height="22"/>
+                <Separator Margin="7,3" Width="1" Height="22"/>
 
                 <Button Style="{StaticResource ToolButton}" x:Name="AddOperationButton"
                         Content="Add operation" Click="AddOperation_Click" MinWidth="110"
                         FontWeight="SemiBold"/>
 
-                <Separator Margin="7,2" Width="1" Height="22"/>
+                <Separator Margin="7,3" Width="1" Height="22"/>
 
                 <TextBlock Style="{StaticResource ToolLabel}" Text="Cycle time:"/>
-                <TextBox x:Name="CycleTimeBox" Width="70" Padding="3" VerticalAlignment="Center"
+                <TextBox x:Name="CycleTimeBox" Width="70" Padding="3" Margin="0,3"
+                         VerticalAlignment="Center"
                          KeyDown="CycleTime_KeyDown" LostFocus="CycleTime_LostFocus"/>
 
-                <Separator Margin="7,2" Width="1" Height="22"/>
+                <Separator Margin="7,3" Width="1" Height="22"/>
             </WrapPanel>
             </DockPanel>
         </Border>
