@@ -293,6 +293,11 @@ public sealed class ImageRegionView : FrameworkElement
         foreach (var robot in RobotMarkers)
             DrawCrosshair(dc, robot);
 
+        // The names come after every mark, so two robots standing close together cannot have one's
+        // crosshair drawn across the other's label.
+        foreach (var robot in RobotMarkers)
+            DrawRobotLabel(dc, robot);
+
         if (_dragging)
             dc.DrawRectangle(RubberBandFill, RubberBandPen, new Rect(_dragStart, _dragCurrent));
 
@@ -306,7 +311,8 @@ public sealed class ImageRegionView : FrameworkElement
 
     /// <summary>
     /// A robot's place on the image: a ring with four arms, in the robot's own colour when the chart
-    /// is colour coding by robot and a neutral grey when it is not. Hovering names it.
+    /// is colour coding by robot and a neutral near-white when it is not. Its name is drawn beneath
+    /// it, always - see <see cref="DrawRobotLabel"/>. Hovering thickens the mark.
     /// </summary>
     private void DrawCrosshair(DrawingContext dc, RobotInfo robot)
     {
@@ -314,7 +320,7 @@ public sealed class ImageRegionView : FrameworkElement
             return;
 
         var centre = ToScreen(location);
-        var reach = Math.Clamp(CrosshairReach * _scale, MinCrosshairReach, MaxCrosshairReach);
+        var reach = Reach;
         var thickness = Math.Clamp(BaseBorderThickness * _scale, MinCrosshairPen, MaxCrosshairPen);
         var hovered = ReferenceEquals(_hoverRobot, robot);
 
@@ -328,14 +334,23 @@ public sealed class ImageRegionView : FrameworkElement
         // one. A halo is not used here: the crosshair is small enough that one would swallow it.
         CrosshairIcon.Draw(dc, centre, reach, new Pen(KeylineBrush, thickness + 2));
         CrosshairIcon.Draw(dc, centre, reach, new Pen(stroke, thickness));
-
-        if (hovered)
-            DrawRobotLabel(dc, robot, centre, reach);
     }
 
-    /// <summary>The robot's name on the same dark plate the region titles use, under the crosshair.</summary>
-    private void DrawRobotLabel(DrawingContext dc, RobotInfo robot, Point centre, double reach)
+    /// <summary>How far a crosshair's arms reach at the current zoom, held between the two limits.</summary>
+    private double Reach => Math.Clamp(CrosshairReach * _scale, MinCrosshairReach, MaxCrosshairReach);
+
+    /// <summary>
+    /// The robot's name on the same dark plate the region titles use, under the crosshair. A region
+    /// wears its title whether or not the pointer is near it, and a robot's place now reads the same
+    /// way, so the image says what is on it without having to be explored.
+    /// </summary>
+    private void DrawRobotLabel(DrawingContext dc, RobotInfo robot)
     {
+        if (robot.Location is not { } location)
+            return;
+
+        var centre = ToScreen(location);
+        var reach = Reach;
         var stroke = RobotBrushProvider?.Invoke(robot) ?? CrosshairBrush;
         var text = Text(robot.Name, LabelFontSize, Brushes.White, BoldFace);
         var w = text.Width + (LabelPaddingX + LabelBorderThickness) * 2;
