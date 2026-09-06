@@ -62,7 +62,7 @@ belongs to one, so the colour of a bar tells you where in the cell it is happeni
 
 ## Building
 
-Needs the [.NET 9 SDK](https://dotnet.microsoft.com/download) and Windows — it is a WPF application.
+Needs the [.NET 9 SDK](https://dotnet.microsoft.com/download) and Windows, being a WPF application.
 
 ```bash
 git clone https://github.com/InfiniteQueue/cycletime-gantt-editor.git
@@ -95,16 +95,6 @@ Or open `CellGanttChartEditor2.sln` in Visual Studio and press F5.
 | Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z | Undo, redo |
 | Esc | Cancel a pick in progress |
 
-## Before you use it in anger
-
-Two lists in the source are deliberately left as placeholders, because the right values depend on the
-shop rather than on the program:
-
-- `Services/Presets.cs` — the robot and operation names offered in the dropdowns.
-- `Models/OperationCategory.cs` and `Models/RegionCategory.cs` — the category sets. Operation
-  categories are free text and their presets are only suggestions; region categories are a fixed
-  enum and are worth editing to match how your cells are actually described.
-
 ## File format
 
 `.cgc` is JSON with the layout image embedded as base64. The format is versioned and older files
@@ -113,4 +103,4 @@ keep loading — the current version is 5.
 ## Status
 
 Written for a real cycle time study rather than as a product, and shaped by using it. It does what it
-is described as doing here; it has not been hardened against everything a stranger might do to it.
+is described as doing here.
