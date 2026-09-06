@@ -3,10 +3,9 @@
 A Windows desktop editor for **robot cell cycle charts**: a layout drawing of the cell with its
 stations marked on it, and a looping Gantt chart of the operations carried out in them.
 
-It answers the question a cycle time study actually asks — *what is every robot doing at each moment
-of the cycle, and where do two of them want the same thing at once?*
-
-![The editor, with a cell layout above and the cycle chart below](docs/screenshot.png)
+The key focus of this app is to make operation time overlaps/conflicts obvious not just per robot, but per station, 
+and properly handle the cyclical nature of process cycles by allowing operations to wrap around to the end back to 
+the start
 
 ## What it is for
 
